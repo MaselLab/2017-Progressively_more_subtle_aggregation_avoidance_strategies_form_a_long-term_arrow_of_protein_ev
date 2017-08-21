@@ -1,0 +1,270 @@
+---
+title: "Amino acid composition comparison summary"
+author: "Ben Wilson"
+output: html_document
+---
+  
+Load mySQL table info for genes
+```{r}
+gene.data <- read.table("2017-06-20_EnsemblV73_MouseGenes.tab", sep="\t",header=T) 
+protein.data <- read.table("2017-06-20_EnsemblV73_MouseProteins.tab", sep="\t",header=T)
+
+APR.data <- merge(gene.data, protein.data, by.x="MouseGenesPrimaryKey", by.y="MouseGenesForeignKey")
+remove(gene.data)
+remove(protein.data)
+```
+
+Factorize gene family number and phylostratum
+```{r}
+APR.data$GeneFamilyNumber <- as.factor(APR.data$GeneFamilyNumber) #factorize gene family ID to prevent numeric interpretation by R
+APR.data$GeneFamilyPhylostratum <- as.factor(APR.data$GeneFamilyPhylostratum) #factorize variable to ensure that it is not interpreted as numeric variable
+APR.data$GeneFamilyPhylostratum <- with(APR.data, factor(GeneFamilyPhylostratum, levels = c(sort(unique(APR.data$GeneFamilyPhylostratum)),"Intergenic","Repeat-masked"))) # set levels of categorical phylostratum variable
+APR.data$ExcludedGeneBinary <- as.factor(APR.data$ExcludedGeneBinary) #factorize binary category for gene families with ambiguous age
+
+```
+
+Set phylostrata for intergenic controls
+```{r}
+APR.data[which(APR.data$GeneOrControlDesignation == "IntergenicNucleotideSeqControl"),]$GeneFamilyPhylostratum <- "Intergenic" #Give intergenic sequence a categorical phylostratum for comparison
+APR.data[which(APR.data$GeneOrControlDesignation == "MaskedIntergenicNucleotideSeqControl"),]$GeneFamilyPhylostratum <- "Repeat-masked" #Give repeat-masked intergenic sequence a categorical phylostratum
+
+```
+
+Remove phylostratum 0 (unclassifiable), gene families with ambiguous age, genes without rat homologs, and ORFan proteins
+```{r}
+APR.data <- APR.data[which(APR.data$GeneFamilyPhylostratum != "0" & APR.data$GeneFamilyPhylostratum != "20" & APR.data$ExcludedGeneBinary != "1" ),] #exclude unclassifiable genes, false-positive rich ORFans
+```
+
+Trim data frame to only the information needed
+```{r}
+genes <- APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),c("EnsemblGeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","TangoPentamerAAInAPRsDensity","MannigeHydrophobicityPercent","BoussauThermophilicPercent")] #subset out genes
+scrambled <- APR.data[which(APR.data$GeneOrControlDesignation == "ScrambledByAminoAcidControl"),c("EnsemblGeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","TangoPentamerAAInAPRsDensity","MannigeHydrophobicityPercent","BoussauThermophilicPercent")] #subset out scrambled controls
+intergenic <- APR.data[which(APR.data$GeneOrControlDesignation == "IntergenicNucleotideSeqControl"),c("EnsemblGeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","TangoPentamerAAInAPRsDensity","MannigeHydrophobicityPercent","BoussauThermophilicPercent")] #subset out intergenic
+masked <- APR.data[which(APR.data$GeneOrControlDesignation == "MaskedIntergenicNucleotideSeqControl"),c("EnsemblGeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","TangoPentamerAAInAPRsDensity","MannigeHydrophobicityPercent","BoussauThermophilicPercent")] #subset out intergenic
+remove(APR.data) #clear large data frame with unnecessary information
+```
+
+Use two-parameter Box-Cox transform to reduce skewness
+```{r}
+library(geoR)
+
+bcFit.TangoNumAA <- boxcoxfit(genes$TangoPentamerAAInAPRsDensity, lambda2 =  NULL) #Fit Box-Cox transform to each aggregation metric
+lambda1.TangoNumAA <- unname(bcFit.TangoNumAA$lambda[1])
+lambda1.TangoNumAA
+
+bcFit.Oiliness <- boxcoxfit(genes$MannigeHydrophobicityPercent, lambda2 =  NULL) #Fit Box-Cox transform to each aggregation metric
+lambda1.Oiliness <- unname(bcFit.Oiliness$lambda[1])
+lambda1.Oiliness
+
+bcFit.Thermo <- boxcoxfit(genes$BoussauThermophilicPercent, lambda2 =  NULL) #Fit Box-Cox transform to each aggregation metric
+lambda1.Thermo <- unname(bcFit.Thermo$lambda[1])
+lambda1.Thermo
+
+
+bc.transform <- function(x,l1,l2){ #Create function to transform data according to fit parameters
+  x.transform <- ((x+l2)^l1 - 1)/l1
+  return(x.transform)
+}
+
+
+scrambled$bcTangoNumAA <- bc.transform(scrambled$TangoPentamerAAInAPRsDensity, lambda1.TangoNumAA, 0) #tranform metrics with fitted parameters
+intergenic$bcTangoNumAA <- bc.transform(intergenic$TangoPentamerAAInAPRsDensity, lambda1.TangoNumAA, 0) #...
+masked$bcTangoNumAA <- bc.transform(masked$TangoPentamerAAInAPRsDensity, lambda1.TangoNumAA, 0) #...
+
+genes$bcOiliness <- bc.transform(genes$MannigeHydrophobicityPercent, lambda1.Oiliness, 0) #...
+intergenic$bcOiliness <- bc.transform(intergenic$MannigeHydrophobicityPercent, lambda1.Oiliness, 0) #...
+masked$bcOiliness <- bc.transform(masked$MannigeHydrophobicityPercent, lambda1.Oiliness, 0) #...
+
+
+genes$bcThermo <- bc.transform(genes$BoussauThermophilicPercent, lambda1.Thermo, 0) #...
+intergenic$bcThermo <- bc.transform(intergenic$BoussauThermophilicPercent, lambda1.Thermo, 0) #...
+masked$bcThermo <- bc.transform(masked$BoussauThermophilicPercent, lambda1.Thermo, 0) #...
+```
+
+Generate family of linear models for each phylostratum controlling for gene family variance
+```{r}
+
+#**********NLME FITS*********
+library(nlme)
+
+#Tango scrambled fits
+fit.APR.scrambled <- lme(bcTangoNumAA ~ GeneFamilyPhylostratum, random = ~ 1|GeneFamilyNumber, data = scrambled, control = list(opt = "optim"), na.action = na.exclude) #fit linear mixed-effects model for genes with gene family as random error term
+summary(fit.APR.scrambled) 
+
+fit.APR.intergenic <- lm(bcTangoNumAA ~ 1 , data = intergenic) #fit standard linear model to intergenic controls
+fit.APR.masked <- lm(bcTangoNumAA ~ 1 , data = masked) #...same for repeat-masked controls
+
+
+
+#Hydrophobicity fits
+fit.oiliness.genes <- lme(bcOiliness ~ GeneFamilyPhylostratum , random = ~ 1|GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude)
+summary(fit.oiliness.genes) #fit a mixed-effects model with gene family as a random effect term
+
+fit.oiliness.intergenic <- lm(bcOiliness ~ 1, data = intergenic)
+fit.oiliness.masked <- lm(bcOiliness ~ 1, data = masked)
+
+
+#Thermophilicity fits
+fit.thermo.genes <- lme(bcThermo ~ GeneFamilyPhylostratum , random = ~ 1|GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude)
+summary(fit.thermo.genes) #fit a mixed-effects model with gene family as a random effect term
+
+fit.thermo.intergenic <- lm(bcThermo ~ 1, data = intergenic)
+fit.thermo.masked <- lm(bcThermo ~ 1, data = masked)
+
+
+```
+
+Build data frames from linear model outptut
+```{r}
+# Put model estimates into data frames for aggregation data
+last.index.scrambled <- length(fixed.effects(fit.APR.scrambled))  #store number of PS that have been fit for scrambled
+scrambled.df.APR <- data.frame(Phylostratum = names(fixed.effects(fit.APR.scrambled)[1:last.index.scrambled]), Intercept = unname(fixed.effects(fit.APR.scrambled)[1:last.index.scrambled]), SE = unname(summary(fit.APR.scrambled)$tTable[,2][1:last.index.scrambled]), Model = "Scrambled controls", Metric = "Aggregation") #create data frame to store lm results for the scrambled fit
+remove(fit.APR.scrambled)
+
+intergenic.df.APR <- data.frame(Phylostratum = c("Intergenic"), Intercept = summary(fit.APR.intergenic)$coefficients[1], SE = summary(fit.APR.intergenic)$coefficients[2], Model = "Intergenic", Metric = "Aggregation") #create data frame to store intergenic fit
+remove(fit.APR.intergenic)
+
+masked.df.APR <- data.frame(Phylostratum = c("Repeat-masked"), Intercept = summary(fit.APR.masked)$coefficients[1], SE = summary(fit.APR.masked)$coefficients[2], Model = "Repeat-masked", Metric = "Aggregation") #create data frame to store repeat-masked intergenic fit
+remove(fit.APR.masked)
+
+
+# Put model estimates into data frames for hydrophobicity data
+last.index.genes.oiliness <- length(fixed.effects(fit.oiliness.genes))  #store number of PS that have been fit for genes
+genes.df.oiliness <- data.frame(Phylostratum = names(fixed.effects(fit.oiliness.genes)[1:last.index.genes.oiliness]), Intercept = unname(fixed.effects(fit.oiliness.genes)[1:last.index.genes.oiliness]), SE = unname(summary(fit.oiliness.genes)$tTable[,2][1:last.index.genes.oiliness]), Model = "Genes", Metric = "Oiliness") #create data frame to store lm results for the genes fit
+remove(fit.oiliness.genes)
+
+intergenic.df.oiliness <- data.frame(Phylostratum = c("Intergenic"), Intercept = summary(fit.oiliness.intergenic)$coefficients[1], SE = summary(fit.oiliness.intergenic)$coefficients[2], Model = "Intergenic", Metric = "Oiliness") #create data frame to store intergenic fit
+remove(fit.oiliness.intergenic)
+
+masked.df.oiliness <- data.frame(Phylostratum = c("Repeat-masked"), Intercept = summary(fit.oiliness.masked)$coefficients[1], SE = summary(fit.oiliness.masked)$coefficients[2], Model = "Repeat-masked", Metric = "Oiliness") #create data frame to store repeat-masked intergenic fit
+remove(fit.oiliness.masked)
+
+
+# Put model estimates into data frames for thermophilicity data
+last.index.genes.thermo <- length(fixed.effects(fit.thermo.genes))  #store number of PS that have been fit for genes
+genes.df.thermo <- data.frame(Phylostratum = names(fixed.effects(fit.thermo.genes)[1:last.index.genes.thermo]), Intercept = unname(fixed.effects(fit.thermo.genes)[1:last.index.genes.thermo]), SE = unname(summary(fit.thermo.genes)$tTable[,2][1:last.index.genes.thermo]), Model = "Genes", Metric = "Thermophilicity") #create data frame to store lm results for the genes fit
+remove(fit.thermo.genes)
+
+intergenic.df.thermo <- data.frame(Phylostratum = c("Intergenic"), Intercept = summary(fit.thermo.intergenic)$coefficients[1], SE = summary(fit.thermo.intergenic)$coefficients[2], Model = "Intergenic", Metric = "Thermophilicity") #create data frame to store intergenic fit
+remove(fit.thermo.intergenic
+       )
+masked.df.thermo <- data.frame(Phylostratum = c("Repeat-masked"), Intercept = summary(fit.thermo.masked)$coefficients[1], SE = summary(fit.thermo.masked)$coefficients[2], Model = "Repeat-masked", Metric = "Thermophilicity") #create data frame to store repeat-masked intergenic fit
+remove(fit.thermo.masked)
+
+
+
+```
+
+Adjust means for each phylostrata by incrementing by the first mean (adjust for R convention), combine data frames per categorization
+```{r}
+# Adjust intecepts, combine data frames
+scrambled.df.APR$Intercept[2:last.index.scrambled] <- scrambled.df.APR$Intercept[2:last.index.scrambled] + scrambled.df.APR$Intercept[1] #increment means by first means to correct for R convention for storing fit results
+
+genes.df.oiliness$Intercept[2:last.index.genes.oiliness] <- genes.df.oiliness$Intercept[2:last.index.genes.oiliness] + genes.df.oiliness$Intercept[1] #...same for other fits
+
+genes.df.thermo$Intercept[2:last.index.genes.thermo] <- genes.df.thermo$Intercept[2:last.index.genes.thermo] + genes.df.thermo$Intercept[1] #...same for other fits
+
+
+#Define reverse transform
+bc.reverse.transform <- function(x,l1,l2){
+  x.reverse.transform <- (x*l1+1)^(1/l1)-l2
+  return(x.reverse.transform)
+}
+
+#Reverse Box-Cox transform so data are in human-readable format
+
+scrambled.df.APR$Upper <- bc.reverse.transform((scrambled.df.APR$Intercept + scrambled.df.APR$SE), lambda1.TangoNumAA, 0)
+scrambled.df.APR$Lower <- bc.reverse.transform((scrambled.df.APR$Intercept - scrambled.df.APR$SE), lambda1.TangoNumAA, 0)
+scrambled.df.APR$Intercept <- bc.reverse.transform(scrambled.df.APR$Intercept, lambda1.TangoNumAA, 0)
+intergenic.df.APR$Upper <- bc.reverse.transform((intergenic.df.APR$Intercept + intergenic.df.APR$SE), lambda1.TangoNumAA, 0)
+intergenic.df.APR$Lower <- bc.reverse.transform((intergenic.df.APR$Intercept - intergenic.df.APR$SE), lambda1.TangoNumAA, 0)
+intergenic.df.APR$Intercept <- bc.reverse.transform(intergenic.df.APR$Intercept, lambda1.TangoNumAA, 0)
+masked.df.APR$Upper <- bc.reverse.transform((masked.df.APR$Intercept + masked.df.APR$SE), lambda1.TangoNumAA, 0)
+masked.df.APR$Lower <- bc.reverse.transform((masked.df.APR$Intercept - masked.df.APR$SE), lambda1.TangoNumAA, 0)
+masked.df.APR$Intercept <- bc.reverse.transform(masked.df.APR$Intercept, lambda1.TangoNumAA, 0)
+
+genes.df.oiliness$Upper <- bc.reverse.transform((genes.df.oiliness$Intercept + genes.df.oiliness$SE), lambda1.Oiliness, 0)
+genes.df.oiliness$Lower <- bc.reverse.transform((genes.df.oiliness$Intercept - genes.df.oiliness$SE), lambda1.Oiliness, 0)
+genes.df.oiliness$Intercept <- bc.reverse.transform(genes.df.oiliness$Intercept, lambda1.Oiliness, 0)
+intergenic.df.oiliness$Upper <- bc.reverse.transform((intergenic.df.oiliness$Intercept + intergenic.df.oiliness$SE), lambda1.Oiliness, 0)
+intergenic.df.oiliness$Lower <- bc.reverse.transform((intergenic.df.oiliness$Intercept - intergenic.df.oiliness$SE), lambda1.Oiliness, 0)
+intergenic.df.oiliness$Intercept <- bc.reverse.transform(intergenic.df.oiliness$Intercept, lambda1.Oiliness, 0)
+masked.df.oiliness$Upper <- bc.reverse.transform((masked.df.oiliness$Intercept + masked.df.oiliness$SE), lambda1.Oiliness, 0)
+masked.df.oiliness$Lower <- bc.reverse.transform((masked.df.oiliness$Intercept - masked.df.oiliness$SE), lambda1.Oiliness, 0)
+masked.df.oiliness$Intercept <- bc.reverse.transform(masked.df.oiliness$Intercept, lambda1.Oiliness, 0)
+
+
+genes.df.thermo$Upper <- bc.reverse.transform((genes.df.thermo$Intercept + genes.df.thermo$SE), lambda1.Thermo, 0)
+genes.df.thermo$Lower <- bc.reverse.transform((genes.df.thermo$Intercept - genes.df.thermo$SE), lambda1.Thermo, 0)
+genes.df.thermo$Intercept <- bc.reverse.transform(genes.df.thermo$Intercept, lambda1.Thermo, 0)
+intergenic.df.thermo$Upper <- bc.reverse.transform((intergenic.df.thermo$Intercept + intergenic.df.thermo$SE), lambda1.Thermo, 0)
+intergenic.df.thermo$Lower <- bc.reverse.transform((intergenic.df.thermo$Intercept - intergenic.df.thermo$SE), lambda1.Thermo, 0)
+intergenic.df.thermo$Intercept <- bc.reverse.transform(intergenic.df.thermo$Intercept, lambda1.Thermo, 0)
+masked.df.thermo$Upper <- bc.reverse.transform((masked.df.thermo$Intercept + masked.df.thermo$SE), lambda1.Thermo, 0)
+masked.df.thermo$Lower <- bc.reverse.transform((masked.df.thermo$Intercept - masked.df.thermo$SE), lambda1.Thermo, 0)
+masked.df.thermo$Intercept <- bc.reverse.transform(masked.df.thermo$Intercept, lambda1.Thermo, 0)
+
+combined.df <- rbind(scrambled.df.APR, genes.df.oiliness, genes.df.thermo, intergenic.df.APR, intergenic.df.oiliness, intergenic.df.thermo, masked.df.APR, masked.df.oiliness, masked.df.thermo) #combine result data frames
+combined.df$Phylostratum <- replace(as.character(combined.df$Phylostratum),1:(last.index.scrambled+last.index.genes.oiliness+last.index.genes.thermo),c(1:last.index.scrambled,1:last.index.genes.oiliness,1:last.index.genes.thermo)) #change PS names for the scrambled and gene fits to numeric characters
+combined.df$Phylostratum <- with(combined.df, factor(Phylostratum, levels = c(1:max(last.index.genes.thermo,last.index.genes.oiliness,last.index.scrambled),"Intergenic","Repeat-masked"))) #change factor levels for PS for combined results data frame
+
+```
+
+
+Make plots to visualize effects of different categorization
+```{r}
+# Plots for each categorization
+library("grid")
+library("ggplot2")
+
+
+#Create colorblind friendly palette
+colorblindPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+colBlack <- colorblindPalette[1]
+colOrange <- colorblindPalette[2]
+colSkyBlue <- colorblindPalette[3]
+colGreen <- colorblindPalette[4]
+colYellow <- colorblindPalette[5]
+colDarkBlue <- colorblindPalette[6]
+colVermillion <- colorblindPalette[7]
+colPink <- colorblindPalette[8]
+
+interval.times <- read.table("split_interval_times.txt")
+axis.breaks <- -log10(interval.times$V1)
+
+
+#axis.breaks <- c(axis.breaks,-7.8,-7.75) #add extra points for controls
+combined.df$Times <-c(rep(axis.breaks,3),rep(-7.8,3),rep(-7.75,3))
+
+aacomposition.summary.plot <- ggplot(combined.df, aes(colour = Metric, fill = Metric, shape = Model)) #Create ggplot object
+aacomposition.summary.plot <- aacomposition.summary.plot + 
+  geom_pointrange(aes(x = Times, y = Intercept, ymin = Lower, ymax = Upper), size = 0.5, lwd = 1,  show.legend=FALSE) + #add point between error bars
+  geom_vline(xintercept = -7.85, color = "darkgrey", linetype = 2) +
+  scale_x_continuous(labels=c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria","\nEuarchontoglires","Rodentia","Intergenic","Repeat-masked"), breaks = unique(combined.df$Times)) + #change x-axis names of phylostrata to taxonomic split names
+  scale_shape_manual(name = "", values = c(22,21,23,24)) + #manually set hollow shapes
+  scale_colour_manual(name = "", values = c(colVermillion,colBlack,colPink), guide = FALSE) + #manually set line colors
+  scale_fill_manual(name = "", values = c(colVermillion,colBlack,colPink), guide = FALSE) + #manually set fill colors
+  ylim(c(0.0,0.45))+
+  annotate("text", x = -8.025, y = 0.4, label = "Thermophilicity", color = colPink) +
+  annotate("text", x = -7.95, y = 0.30, label = "Oiliness", color = colBlack) +
+  annotate("text", x = -8.0, y = 0.12, label = "Aggregation", color = colVermillion) +
+  theme( 
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(), 
+    axis.text.y = element_text(size=10),
+    axis.title.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,13)), hjust = 1, vjust = 0.5, colour=c(rep("black",7),"lightslategrey",rep("black",11),colDarkBlue,colSkyBlue)),
+    legend.title = element_text(size=11),
+    legend.text = element_text(size=8),
+    legend.background = element_rect(fill="transparent"),
+    legend.position = c(0.5,0.95),
+    legend.direction = "horizontal",
+    plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm")) #plot specifics for sizes, positions, orientations, etc.
+aacomposition.summary.plot
+
+pdf(file = "AAComposition_Summary.pdf", width =6.7, height = 5) #output plot to pdf
+aacomposition.summary.plot
+dev.off()
+
+```
