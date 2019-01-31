@@ -6,42 +6,93 @@ output: html_document
   
 Load mySQL table info for genes
 ```{r}
-gene.data <- read.table("2017-06-20_EnsemblV73_MouseGenes.tab", sep="\t",header=T) 
-protein.data <- read.table("2017-06-20_EnsemblV73_MouseProteins.tab", sep="\t",header=T)
+gene.data <- read.table("InputFinal/EnsemblV73_MouseGenes.tab", sep="\t",header=T) 
+protein.data <- read.table("InputFinal/EnsemblV73_MouseProteins.tab", sep="\t",header=T)
 
 APR.data <- merge(gene.data, protein.data, by.x="MouseGenesPrimaryKey", by.y="MouseGenesForeignKey")
 remove(gene.data)
 remove(protein.data)
-membrane.data <- read.table("EnsemblV73_MouseProteins_Membrane_Additions.tab", sep="\t",header=T)
-APR.data <- merge(APR.data, membrane.data[,c("MouseProteinsPrimaryKey","MemProtKnown3DStructBinary")], by="MouseProteinsPrimaryKey")
+
+transmembrane.data <- read.table("InputFinal/TMHMM_Transmembrane_Designations.tab", sep="\t", header=T)
+transmembrane.data <- transmembrane.data[,c("MouseProteinsPrimaryKey","TMHMMTransmembraneBinary")]
+APR.data <- merge(APR.data, transmembrane.data, by = "MouseProteinsPrimaryKey")
+
+dispersion.data <- read.table("InputFinal/2017-11-19_EnsemblV73_MouseProteins_FILVMW_Dispersion.tab", sep="\t", header=T)
+dispersion.data <- dispersion.data[,c("MouseProteinsPrimaryKey","HydrophobicDispersionBlock6")]
+colnames(dispersion.data) <- c("MouseProteinsPrimaryKey","FILVMW_BinaryHydrophobicDispersionBlock6")
+
+genes.dispersion.new <- APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),c("MouseProteinsPrimaryKey","EnsemblGeneUID","PS21_GeneFamilyNumber","PS21_GeneFamilyPhylostratum","EvolutionaryRateHighestOrthologRate","ProteinSeqLength","PaxDBExpression","TransmembraneBinary","TMHMMTransmembraneBinary","PS21_ExcludedGeneBinary","TangoPentamerAAInAPRsDensity")] 
+genes.dispersion.new <- merge(genes.dispersion.new, dispersion.data[,c("MouseProteinsPrimaryKey","FILVMW_BinaryHydrophobicDispersionBlock6")], by="MouseProteinsPrimaryKey")
+
+
+intergenic.dispersion.new <- APR.data[which(APR.data$GeneOrControlDesignation == "IntergenicNucleotideSeqControl"),c("MouseProteinsPrimaryKey","EnsemblGeneUID","PS21_GeneFamilyNumber","PS21_GeneFamilyPhylostratum","EvolutionaryRateHighestOrthologRate","ProteinSeqLength","PaxDBExpression","TransmembraneBinary","PS21_ExcludedGeneBinary")] 
+intergenic.dispersion.new <- merge(intergenic.dispersion.new, dispersion.data[,c("MouseProteinsPrimaryKey","FILVMW_BinaryHydrophobicDispersionBlock6")], by="MouseProteinsPrimaryKey")
+
+masked.dispersion.new <- APR.data[which(APR.data$GeneOrControlDesignation == "MaskedIntergenicNucleotideSeqControl"),c("MouseProteinsPrimaryKey","EnsemblGeneUID","PS21_GeneFamilyNumber","PS21_GeneFamilyPhylostratum","EvolutionaryRateHighestOrthologRate","ProteinSeqLength","PaxDBExpression","TransmembraneBinary","PS21_ExcludedGeneBinary")] 
+masked.dispersion.new <- merge(masked.dispersion.new, dispersion.data[,c("MouseProteinsPrimaryKey","FILVMW_BinaryHydrophobicDispersionBlock6")], by="MouseProteinsPrimaryKey")
 ```
 
 Remove phylostratum 0 (unclassifiable), gene families with ambiguous age, genes without rat homologs, and ORFan proteins
 ```{r}
-APR.data <- APR.data[which(APR.data$GeneFamilyPhylostratum != "0" & APR.data$GeneFamilyPhylostratum != "20" & APR.data$ExcludedGeneBinary != "1" ),] #exclude unclassifiable genes, false-positive rich ORFans
+paralogs.list <- c("ENSMUSG00000073631","ENSMUSG00000079800","ENSMUSG00000094728","ENSMUSG00000095240","ENSMUSG00000095366","ENSMUSG00000095450","ENSMUSG00000095787","ENSMUSG00000096100","ENSMUSG00000096850")
+APR.data <- APR.data[which(APR.data$PS21_GeneFamilyPhylostratum != "0" & APR.data$PS21_GeneFamilyPhylostratum != "21" & APR.data$PS21_ExcludedGeneBinary != "1" ),] #exclude unclassifiable genes, false-positive rich ORFans
+APR.data <- APR.data[which(!(APR.data$EnsemblGeneUID %in% paralogs.list)),]#remove genes with known paralogy to other genes
+
+genes.dispersion.new <- genes.dispersion.new[which(genes.dispersion.new$PS21_GeneFamilyPhylostratum != "0" & genes.dispersion.new$PS21_GeneFamilyPhylostratum != "21" & genes.dispersion.new$PS21_ExcludedGeneBinary != "1" ),] #exclude unclassifiable genes, false-positive rich ORFans
+genes.dispersion.new <- genes.dispersion.new[which(!(genes.dispersion.new$EnsemblGeneUID %in% paralogs.list)),]#remove genes with known paralogy to other genes
+
+intergenic.dispersion.new <- intergenic.dispersion.new[which(intergenic.dispersion.new$PS21_GeneFamilyPhylostratum != "0" & intergenic.dispersion.new$PS21_GeneFamilyPhylostratum != "21" & intergenic.dispersion.new$PS21_ExcludedGeneBinary != "1"),]
+intergenic.dispersion.new <- intergenic.dispersion.new[which(!(intergenic.dispersion.new$EnsemblGeneUID %in% paralogs.list)),]
+
+masked.dispersion.new <- masked.dispersion.new[which(masked.dispersion.new$PS21_GeneFamilyPhylostratum != "0" & masked.dispersion.new$PS21_GeneFamilyPhylostratum != "21" & masked.dispersion.new$PS21_ExcludedGeneBinary != "1"),]
+masked.dispersion.new <- masked.dispersion.new[which(!(masked.dispersion.new$EnsemblGeneUID %in% paralogs.list)),]
+```
+
+```{r}
+APR.data[which(APR.data$EnsemlGeneUID=="ENSMUSG00000067543"),]$PS21_GeneFamilyNumber <- APR.data[which(APR.data$EnsemlGeneUID=="ENSMUSG00000052262"),]$PS21_GeneFamilyNumber #Fix gene family for two pahari genes
+
+genes.dispersion.new[which(genes.dispersion.new$EnsemlGeneUID=="ENSMUSG00000067543"),]$PS21_GeneFamilyNumber <- genes.dispersion.new[which(genes.dispersion.new$EnsemlGeneUID=="ENSMUSG00000052262"),]$PS21_GeneFamilyNumber #Fix gene family for two pahari genes
+
+intergenic.dispersion.new[which(intergenic.dispersion.new$EnsemlGeneUID=="ENSMUSG00000067543"),]$PS21_GeneFamilyNumber <- intergenic.dispersion.new[which(intergenic.dispersion.new$EnsemlGeneUID=="ENSMUSG00000052262"),]$PS21_GeneFamilyNumber #Fix gene family for two pahari genes
+
+masked.dispersion.new[which(masked.dispersion.new$EnsemlGeneUID=="ENSMUSG00000067543"),]$PS21_GeneFamilyNumber <- masked.dispersion.new[which(masked.dispersion.new$EnsemlGeneUID=="ENSMUSG00000052262"),]$PS21_GeneFamilyNumber #Fix gene family for two pahari genes
 
 ```
 
+
 Trim data frame to only the information needed
 ```{r}
-genes <- APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),c("EnsemblGeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","HydrophobicDispersionBlock6","EvolutionaryRateHighestOrthologRate","ProteinSeqLength","PaxDBExpression","MemProtKnown3DStructBinary")] #subset out genes
-intergenic <- APR.data[which(APR.data$GeneOrControlDesignation == "IntergenicNucleotideSeqControl"),c("EnsemblGeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","HydrophobicDispersionBlock6")] #subset out intergenic
-masked <- APR.data[which(APR.data$GeneOrControlDesignation == "MaskedIntergenicNucleotideSeqControl"),c("EnsemblGeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","HydrophobicDispersionBlock6")] #subset out intergenic
+
+genes <- genes.dispersion.new
+
+intergenic <- intergenic.dispersion.new
+
+masked <- masked.dispersion.new
+
 remove(APR.data) #clear large data frame with unnecessary information
 ```
 
 Factorize categorical variables before linear model construction
 ```{r}
-genes$GeneFamilyNumber <- as.factor(genes$GeneFamilyNumber) #factorize gene family identifier to prevent numeric interpretation
-genes$GeneFamilyPhylostratum <- as.factor(genes$GeneFamilyPhylostratum) #factorize PS to prevent numeric interpretation in fit
-genes$GeneFamilyPhylostratum <- with(genes, factor(GeneFamilyPhylostratum, levels = c(sort(unique(genes$GeneFamilyPhylostratum))))) # set levels of categorical phylostratum variable
+genes$PS21_GeneFamilyNumber <- as.factor(genes$PS21_GeneFamilyNumber) #factorize gene family identifier to prevent numeric interpretation
+genes$PS21_GeneFamilyPhylostratum <- as.factor(genes$PS21_GeneFamilyPhylostratum) #factorize PS to prevent numeric interpretation in fit
+genes$PS21_GeneFamilyPhylostratum <- with(genes, factor(PS21_GeneFamilyPhylostratum, levels = c(sort(unique(genes$PS21_GeneFamilyPhylostratum))))) # set levels of categorical phylostratum variable
+
+intergenic$PS21_GeneFamilyNumber <- as.factor(intergenic$PS21_GeneFamilyNumber) #factorize gene family identifier to prevent numeric interpretation
+intergenic$PS21_GeneFamilyPhylostratum <- as.factor(intergenic$PS21_GeneFamilyPhylostratum) #factorize PS to prevent numeric interpretation in fit
+intergenic$PS21_GeneFamilyPhylostratum <- with(intergenic, factor(PS21_GeneFamilyPhylostratum, levels = c(sort(unique(intergenic$PS21_GeneFamilyPhylostratum))))) # set levels of categorical phylostratum variable
+
+masked$PS21_GeneFamilyNumber <- as.factor(masked$PS21_GeneFamilyNumber) #factorize gene family identifier to prevent numeric interpretation
+masked$PS21_GeneFamilyPhylostratum <- as.factor(masked$PS21_GeneFamilyPhylostratum) #factorize PS to prevent numeric interpretation in fit
+masked$PS21_GeneFamilyPhylostratum <- with(masked, factor(PS21_GeneFamilyPhylostratum, levels = c(sort(unique(masked$PS21_GeneFamilyPhylostratum))))) # set levels of categorical phylostratum variable
+
 
 ```
 
 Use two-parameter Box-Cox transform to reduce skewness
 ```{r}
 library(geoR)
-bcFit <- boxcoxfit(genes$HydrophobicDispersionBlock6, lambda2 =  NULL) #Fit 1-parameter Box-Cox transformation
+bcFit <- boxcoxfit(genes$FILVMW_BinaryHydrophobicDispersionBlock6, lambda2 =  NULL) #Fit 1-parameter Box-Cox transformation
 lambda1 <- unname(bcFit$lambda[1])
 lambda2 <- 0
 lambda1
@@ -52,44 +103,78 @@ bc.transform <- function(x,l1,l2){
   return(x.transform)
 }
 
-genes$bcDispersion <- bc.transform(genes$HydrophobicDispersionBlock6, lambda1, lambda2) #transform data to reduce heteroskedasticity
-intergenic$bcDispersion <- bc.transform(intergenic$HydrophobicDispersionBlock6, lambda1, lambda2) #transform data to reduce heteroskedasticity
-masked$bcDispersion <- bc.transform(masked$HydrophobicDispersionBlock6, lambda1, lambda2) #transform data to reduce heteroskedasticity
+genes$bcDispersion <- bc.transform(genes$FILVMW_BinaryHydrophobicDispersionBlock6, lambda1, lambda2) #transform data to reduce heteroskedasticity
+intergenic$bcDispersion <- bc.transform(intergenic$FILVMW_BinaryHydrophobicDispersionBlock6, lambda1, lambda2) #transform data to reduce heteroskedasticity
+masked$bcDispersion <- bc.transform(masked$FILVMW_BinaryHydrophobicDispersionBlock6, lambda1, lambda2) #transform data to reduce heteroskedasticity
+
+bcFit.TangoNumAA <- boxcoxfit(genes$TangoPentamerAAInAPRsDensity, lambda2 =  NULL) #Fit Box-Cox transform to each aggregation metric
+lambda1.TangoNumAA <- unname(bcFit.TangoNumAA$lambda[1])
+lambda1.TangoNumAA
+
+
+genes$bcTangoNumAA <- bc.transform(genes$TangoPentamerAAInAPRsDensity, lambda1.TangoNumAA, 0) 
+```
+```{r}
+#Make QQ plots to see reduction in upper tail skew
+tiff(file = "Clustering_QQ.tif", width = 10, height = 10, units = "cm", res = 300)
+qqnorm(genes$FILVMW_BinaryHydrophobicDispersionBlock6, main = "Clustering Q-Q Plot")
+qqline(genes$FILVMW_BinaryHydrophobicDispersionBlock6, lt=2)
+dev.off()
+
+tiff(file = "BoxCox_Clustering_QQ.tif", width = 10, height = 10, units = "cm", res = 300)
+qqnorm(genes$bcDispersion, main = "Box-Cox Clustering Q-Q Plot")
+qqline(genes$bcDispersion,lt=2)
+dev.off()
+
+tiff(file = "Combined_QQ.tif", width = 15, height = 15, units = "cm", res = 300)
+par(mfrow=c(2,2))
+qqnorm(genes$TangoPentamerAAInAPRsDensity, main = "")
+qqline(genes$TangoPentamerAAInAPRsDensity, lt=2)
+qqnorm(genes$bcTangoNumAA, main = "")
+qqline(genes$bcTangoNumAA,lt=2)
+
+qqnorm(genes$FILVMW_BinaryHydrophobicDispersionBlock6, main = "")
+qqline(genes$FILVMW_BinaryHydrophobicDispersionBlock6, lt=2)
+qqnorm(genes$bcDispersion, main = "")
+qqline(genes$bcDispersion,lt=2)
+dev.off()
+
+
 ```
 
 Generate family of linear models for each phylostratum to give mean dispersion corrected for gene family non-independence
 ```{r}
 library(nlme)
 
-fit.dispersion.genes.standard <- lm(bcDispersion ~ GeneFamilyPhylostratum, data = genes)
-AIC(fit.dispersion.genes.standard) #fit a standard linear model for comparison, print AIC
 
-fit.dispersion.genes.family <- lme(bcDispersion ~ GeneFamilyPhylostratum , random = ~ 1|GeneFamilyNumber, data = genes, method = "ML")
-summary(fit.dispersion.genes.family) #fit a mixed-effects model with gene family as a random effect term
+fit.dispersion.genes.family <- lme(bcDispersion ~ PS21_GeneFamilyPhylostratum , random = ~ 1|PS21_GeneFamilyNumber, data = genes, method = "ML")
+#summary(fit.dispersion.genes.family) #fit a mixed-effects model with gene family as a random effect term
 
-fit.dispersion.genes.family.membrane <- lme(bcDispersion ~ GeneFamilyPhylostratum + MemProtKnown3DStructBinary, random = ~ 1|GeneFamilyNumber, data = genes, method = "ML")
-summary(fit.dispersion.genes.family.membrane) #fit a mixed-effects model with gene family as a random effect term
+fit.dispersion.genes.family.HMMmembrane <- lme(bcDispersion ~ PS21_GeneFamilyPhylostratum + TMHMMTransmembraneBinary, random = ~ 1|PS21_GeneFamilyNumber, data = genes, method = "ML")
+#summary(fit.dispersion.genes.family.membrane) #fit a mixed-effects model with gene family as a random effect term
 
-fit.dispersion.genes.family.expressed <- lme(bcDispersion ~ GeneFamilyPhylostratum, random = ~ 1|GeneFamilyNumber, data = genes[which(!is.na(genes$PaxDBExpression)),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
-summary(fit.dispersion.genes.family.expressed)
+anova(fit.dispersion.genes.family,fit.dispersion.genes.family.HMMmembrane)
 
-fit.dispersion.genes.family.expression <- lme(bcDispersion ~ GeneFamilyPhylostratum + PaxDBExpression, random = ~ 1|GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude, method = "ML")
-summary(fit.dispersion.genes.family.expression)
+
+
+
+fit.dispersion.genes.family.expressed <- lme(bcDispersion ~ PS21_GeneFamilyPhylostratum, random = ~ 1|PS21_GeneFamilyNumber, data = genes[which(!is.na(genes$PaxDBExpression)),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
+#summary(fit.dispersion.genes.family.expressed)
+
+fit.dispersion.genes.family.expression <- lme(bcDispersion ~ PS21_GeneFamilyPhylostratum + PaxDBExpression, random = ~ 1|PS21_GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude, method = "ML")
+#summary(fit.dispersion.genes.family.expression)
 anova(fit.dispersion.genes.family.expressed, fit.dispersion.genes.family.expression)
-#summary(fit.APR.genes.family.expression) #fit linear mixed-effects model for genes with gene family as random error term
 
-fit.dispersion.genes.family.length <- lme(bcDispersion ~ GeneFamilyPhylostratum + ProteinSeqLength, random = ~ 1|GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude, method = "ML")
-summary(fit.dispersion.genes.family.length)
-#summary(fit.APR.genes.family.length) #fit linear mixed-effects model for genes with gene family as random error term
+fit.dispersion.genes.family.length <- lme(bcDispersion ~ PS21_GeneFamilyPhylostratum + ProteinSeqLength, random = ~ 1|PS21_GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude, method = "ML")
+#summary(fit.dispersion.genes.family.length)
 anova(fit.dispersion.genes.family, fit.dispersion.genes.family.length)
 
-fit.dispersion.genes.family.rate <- lme(bcDispersion ~ GeneFamilyPhylostratum + EvolutionaryRateHighestOrthologRate, random = ~ 1|GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude, method = "ML")
+fit.dispersion.genes.family.rate <- lme(bcDispersion ~ PS21_GeneFamilyPhylostratum + EvolutionaryRateHighestOrthologRate, random = ~ 1|PS21_GeneFamilyNumber, data = genes, control = list(opt = "optim"), na.action = na.exclude, method = "ML")
 summary(fit.dispersion.genes.family.rate)
-anova(fit.dispersion.genes.family, fit.dispersion.genes.family.rate)
+#anova(fit.dispersion.genes.family, fit.dispersion.genes.family.rate)
 
-fit.dispersion.intergenic <- lm(bcDispersion ~ 1, data = intergenic)
-fit.dispersion.masked <- lm(bcDispersion ~ 1, data = masked)
-#remove(genes) #clear data frame with gene information
+fit.dispersion.intergenic <- lm(bcDispersion ~ 1, data = intergenic[which(intergenic$bcDispersion != -Inf),], na.action = na.exclude)
+fit.dispersion.masked <- lm(bcDispersion ~ 1, data = masked[which(masked$bcDispersion != -Inf),], na.action = na.exclude)
 
 ```
 
@@ -117,6 +202,14 @@ bc.reverse.transform <- function(x,l1,l2){
 protein.lengths$Lengths <- bc.reverse.transform(protein.lengths$Intercept,length.lambda1,length.lambda2)
 evolutionary.rates$Rates <- bc.reverse.transform(evolutionary.rates$Intercept, rate.lambda1, rate.lambda2)
 expression.levels$ExpressionLevels <- bc.reverse.transform(expression.levels$Intercept, expression.lambda1, expression.lambda2)
+transmembrane.proportions <- table(genes$PS21_GeneFamilyPhylostratum[which(genes$TransmembraneBinary=="true")]) / table(genes$PS21_GeneFamilyPhylostratum)
+
+#Use overall means
+protein.length <- 389.4326
+evolutionary.rate <- 0.1461164
+expression.level <- 1.098262
+transmembrane.proportion <- nrow(genes[which(genes$TMHMMTransmembraneBinary=="yes"),]) / nrow(genes)
+
 ```
 
 Plot means from each model with confidence intervals, build data frames first
@@ -125,17 +218,23 @@ Plot means from each model with confidence intervals, build data frames first
 last.index.genes <- length(fixed.effects(fit.dispersion.genes.family)) #get number of phylostrata that have been fit
 genes.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family)[1:last.index.genes]), Intercept = unname(fixed.effects(fit.dispersion.genes.family)[1:last.index.genes]), SE = unname(summary(fit.dispersion.genes.family)$tTable[,2][1:last.index.genes]), Model = "Genes") #create data frame to hold linear model results
 
-# Put model estimates into data frames
+#Put model estimates into data frames
 last.index.length.corrected <- length(fixed.effects(fit.dispersion.genes.family.length)) - 1 #get number of phylostrata that have been fit
-length.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family.length)[1:last.index.length.corrected]), Intercept = unname(fixed.effects(fit.dispersion.genes.family.length)[1:last.index.length.corrected])+ unname(fixef(fit.dispersion.genes.family.length)[last.index.length.corrected + 1]) * protein.lengths$Lengths, SE = unname(summary(fit.dispersion.genes.family.length)$tTable[,2][1:last.index.length.corrected]), Model = "Length-corrected") #create data frame to hold linear model results
+length.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family.length)[1:last.index.length.corrected]), Intercept = unname(fixed.effects(fit.dispersion.genes.family.length)[1:last.index.length.corrected])+ unname(fixef(fit.dispersion.genes.family.length)[last.index.length.corrected + 1]) * protein.length, SE = unname(summary(fit.dispersion.genes.family.length)$tTable[,2][1:last.index.length.corrected]), Model = "Length-corrected") #create data frame to hold linear model results
 
 # Put model estimates into data frames
 last.index.rate.corrected <- length(fixed.effects(fit.dispersion.genes.family.rate)) - 1 #get number of phylostrata that have been fit
-rate.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family.rate)[1:last.index.rate.corrected]), Intercept = unname(fixed.effects(fit.dispersion.genes.family.rate)[1:last.index.rate.corrected])+ unname(fixef(fit.dispersion.genes.family.rate)[last.index.rate.corrected + 1]) * evolutionary.rates$Rates, SE = unname(summary(fit.dispersion.genes.family.rate)$tTable[,2][1:last.index.rate.corrected]), Model = "Rate-corrected") #create data frame to hold linear model results
+rate.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family.rate)[1:last.index.rate.corrected]), Intercept = unname(fixed.effects(fit.dispersion.genes.family.rate)[1:last.index.rate.corrected])+ unname(fixef(fit.dispersion.genes.family.rate)[last.index.rate.corrected + 1]) * evolutionary.rate, SE = unname(summary(fit.dispersion.genes.family.rate)$tTable[,2][1:last.index.rate.corrected]), Model = "Rate-corrected") #create data frame to hold linear model results
 
 # Put model estimates into data frames
 last.index.expression.corrected <- length(fixed.effects(fit.dispersion.genes.family.expression)) - 1 #get number of phylostrata that have been fit
-expression.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family.expression)[1:last.index.expression.corrected]), Intercept = unname(fixed.effects(fit.dispersion.genes.family.expression)[1:last.index.expression.corrected])+ unname(fixef(fit.dispersion.genes.family.expression)[last.index.expression.corrected + 1]) * expression.levels$ExpressionLevels, SE = unname(summary(fit.dispersion.genes.family.expression)$tTable[,2][1:last.index.expression.corrected]), Model = "Expression-corrected") #create data frame to hold linear model results
+expression.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family.expression)[1:last.index.expression.corrected]), Intercept = unname(fixed.effects(fit.dispersion.genes.family.expression)[1:last.index.expression.corrected])+ unname(fixef(fit.dispersion.genes.family.expression)[last.index.expression.corrected + 1]) * expression.level, SE = unname(summary(fit.dispersion.genes.family.expression)$tTable[,2][1:last.index.expression.corrected]), Model = "Expression-corrected") #create data frame to hold linear model results
+
+
+# Put model estimates into data frames
+last.index.transmembrane.corrected <- length(fixed.effects(fit.dispersion.genes.family.HMMmembrane)) - 1  #get number of phylostrata that have been fit
+transmembrane.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family.HMMmembrane)[1:last.index.transmembrane.corrected]), Intercept = as.vector( unname(fixed.effects(fit.dispersion.genes.family.HMMmembrane)[1:last.index.transmembrane.corrected])+
+unname(fixed.effects(fit.dispersion.genes.family.HMMmembrane)[last.index.transmembrane.corrected+1]) * transmembrane.proportion ), SE = unname(summary(fit.dispersion.genes.family.HMMmembrane)$tTable[,2][1:last.index.transmembrane.corrected]), Model = "HMM Transmembrane-corrected") #create data frame to hold linear model results
 
 
 intergenic.data.frame <- data.frame(Phylostratum = c("Intergenic"), Intercept = summary(fit.dispersion.intergenic)$coefficients[1], SE = summary(fit.dispersion.intergenic)$coefficients[2], Model = "Intergenic") #create data frame to hold linear model results
@@ -143,8 +242,6 @@ intergenic.data.frame <- data.frame(Phylostratum = c("Intergenic"), Intercept = 
 masked.data.frame <- data.frame(Phylostratum = c("Repeat-masked"), Intercept = summary(fit.dispersion.masked)$coefficients[1], SE = summary(fit.dispersion.masked)$coefficients[2], Model = "Repeat-masked") #create data frame to hold linear model results
 
 
-remove(fit.dispersion.intergenic)
-remove(fit.dispersion.masked)
 
 ```
 
@@ -152,17 +249,25 @@ Adjust means for each phylostrata by incrementing by the first mean (adjust for 
 ```{r}
 # Adjust intecepts, combine data frames
 genes.data.frame$Intercept[2:last.index.genes] <- genes.data.frame$Intercept[2:last.index.genes] + genes.data.frame$Intercept[1] #increment means by first mean
+
 length.data.frame$Intercept[2:last.index.length.corrected] <- length.data.frame$Intercept[2:last.index.length.corrected] + length.data.frame$Intercept[1] #increment means by first mean
 rate.data.frame$Intercept[2:last.index.rate.corrected] <- rate.data.frame$Intercept[2:last.index.rate.corrected] + rate.data.frame$Intercept[1] #increment means by first mean
 expression.data.frame$Intercept[2:last.index.expression.corrected] <- expression.data.frame$Intercept[2:last.index.expression.corrected] + expression.data.frame$Intercept[1] #increment means by first mean
 
+
+transmembrane.data.frame$Intercept[2:last.index.transmembrane.corrected] <- transmembrane.data.frame$Intercept[2:last.index.transmembrane.corrected] + transmembrane.data.frame$Intercept[1] #increment means by first mean
+transmembrane.data.frame$Phylostratum <- replace(as.character(transmembrane.data.frame$Phylostratum),1:last.index.transmembrane.corrected,c(1:last.index.transmembrane.corrected)) #replace lm text with numbered
+transmembrane.data.frame$Phylostratum <- with(transmembrane.data.frame, factor(Phylostratum, levels = c(1:last.index.transmembrane.corrected))) # set levels of factorized PS
+
+#Figure 4 data frame
 combined.data.frame <- rbind(genes.data.frame, intergenic.data.frame, masked.data.frame)
 combined.data.frame$Phylostratum <- replace(as.character(combined.data.frame$Phylostratum),1:last.index.genes,c(1:last.index.genes)) #replace lm text with numbered categories
-combined.data.frame$Phylostratum <- with(combined.data.frame, factor(Phylostratum, levels = c(1:last.index.genes,"Intergenic","Repeat-masked"))) # set levels of factorized PS
+combined.data.frame$Phylostratum <- with(combined.data.frame, factor(Phylostratum, levels = c(1:last.index.genes,"Intergenic","Masked"))) # set levels of factorized PS
 
-combined.df <- data.frame(rbind(genes.data.frame, length.data.frame, rate.data.frame, expression.data.frame)) #combine data frames for plotting
-combined.df$Phylostratum <- replace(as.character(combined.df$Phylostratum),1:(last.index.genes+last.index.length.corrected+last.index.rate.corrected+last.index.expression.corrected),c(1:last.index.genes,1:last.index.length.corrected,1:last.index.rate.corrected,1:last.index.expression.corrected)) #replace linear model text with readable phylostratum names
-combined.df$Phylostratum <- with(combined.df, factor(Phylostratum, levels = c(1:max(last.index.genes,last.index.length.corrected,last.index.rate.corrected,last.index.expression.corrected)))) #factorize phylostratum before plotting
+#Figure S2 data frame
+corrected.data.frame <- data.frame(rbind(genes.data.frame, length.data.frame, rate.data.frame, expression.data.frame, transmembrane.data.frame)) #combine data frames for plotting
+corrected.data.frame$Phylostratum <- replace(as.character(corrected.data.frame$Phylostratum),1:(last.index.genes+last.index.length.corrected+last.index.rate.corrected+last.index.expression.corrected+last.index.transmembrane.corrected),c(1:last.index.genes,1:last.index.length.corrected,1:last.index.rate.corrected,1:last.index.expression.corrected,1:last.index.transmembrane.corrected)) #replace linear model text with readable phylostratum names
+corrected.data.frame$Phylostratum <- with(corrected.data.frame, factor(Phylostratum, levels = c(1:max(last.index.genes,last.index.length.corrected,last.index.rate.corrected,last.index.expression.corrected,last.index.transmembrane.corrected)))) #factorize phylostratum before plotting
 
 ```
 
@@ -189,15 +294,20 @@ colPink <- colorblindPalette[8]
 
 interval.times <- read.table("split_interval_times.txt")
 axis.breaks <- -log10(interval.times$V1)
-axis.breaks <- c(axis.breaks,-7.8,-7.75) #add extra points for controls
+linear.scale <- c(-1*interval.times$V1, 100000000, 200000000)
+
+log.scale <- c(axis.breaks,-6.9,-6.85)
+label.vector <- c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria\n","Euarchontoglires","Rodentia","Mus","Intergenic","Masked")
+split.times <- as.character(round(interval.times$V1/1000000.0))
+
 
 
 plot.dispersion <- ggplot(combined.data.frame, aes(colour = Model, fill = Model, shape = Model)) #create ggplot object
 plot.dispersion <- plot.dispersion + 
-  geom_pointrange(aes(x = axis.breaks, y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1, position = position_dodge(width = 0.05),  show.legend=FALSE) + #add points
+  geom_pointrange(aes(x = log.scale, y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1, position = position_dodge(width = 0.05),  show.legend=FALSE) + #add points
   geom_hline(yintercept = 1, linetype = "dashed" ) + #add horizontal line for Poisson expectation
-  scale_x_continuous(labels=c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria","\nEuarchontoglires","Rodentia","Intergenic","Repeat-masked"), breaks = axis.breaks) + #change x-axis names of phylostrata to taxonomic split names
-  geom_vline(xintercept = -7.85, color = "darkgrey", linetype = 2) +
+  scale_x_continuous(labels=label.vector, breaks = log.scale) + #change x-axis names of phylostrata to taxonomic split names
+  geom_vline(xintercept = -7, color = "darkgrey", linetype = 2) +
   scale_colour_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually scale line colors
   scale_fill_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually scale fill colors
   scale_shape_manual(name = "", values = c(21,23,24)) + #manually set hollow shapes
@@ -208,7 +318,7 @@ plot.dispersion <- plot.dispersion +
         axis.text.y = element_text(size=10),
         axis.title.y = element_text(size=11),
         axis.ticks = element_blank(),
-        axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,13)), hjust = 1, vjust = 0.5, colour=c(rep("black",7),"lightslategrey",rep("black",11),colDarkBlue,colSkyBlue)),
+        axis.text.x=element_text(angle = 90, size=c(rep(9,21)), hjust = 1, vjust = 0.5, colour=c(rep("black",20),colDarkBlue,colSkyBlue)),
         legend.title = element_text(size=11),
         legend.text = element_text(size=8),
         legend.background = element_rect(fill="transparent"),
@@ -218,21 +328,33 @@ plot.dispersion <- plot.dispersion +
 
 plot.dispersion
 
-pdf(file = "DispersionGenesIntergenicMasked.pdf", width =6.7, height = 3) #output plot object to pdf
+tiff(file = "Clustering_Intergenic_Masked.tif", width =20, height = 10, units = "cm", res = 300) #output plot object to tif
 plot.dispersion
 dev.off()
 
 
 
-plot.dispersion.corrected <- ggplot(combined.df, aes(colour = Model, fill = Model, shape = Model)) #create ggplot object
-plot.dispersion.corrected <- plot.dispersion.corrected + 
-  geom_pointrange(aes(x = rep(axis.breaks[1:19],4), y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1, position = position_dodge(width = 0.05),  show.legend=TRUE) + #add points
+
+
+
+
+
+
+linear.scale <- c(-1*interval.times$V1[16:20], 10000000, 20000000)
+log.scale <- c(axis.breaks[16:20],-6.9,-6.85)
+
+label.vector <- c("Eutheria","Boreoeutheria\n","Euarchontoglires","Rodentia","Mus","Intergenic","Masked")
+plot.dispersion.inset <- ggplot(combined.data.frame[16:22,], aes(colour = Model, fill = Model, shape = Model)) #create ggplot object
+plot.dispersion.inset <- plot.dispersion.inset + 
+  geom_pointrange(aes(x = log.scale, y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1, position = position_dodge(width = 0.05),  show.legend=FALSE) + #add points
   geom_hline(yintercept = 1, linetype = "dashed" ) + #add horizontal line for Poisson expectation
-  scale_x_continuous(labels=c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria","\nEuarchontoglires","Rodentia"), breaks = axis.breaks[1:19]) + #change x-axis names of phylostrata to taxonomic split names
-  scale_colour_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue,colGreen), guide=guide_legend(nrow=2,byrow=TRUE)) + #manually scale line colors
-  scale_fill_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue,colGreen)) + #manually scale fill colors
-  scale_shape_manual(name = "", values = c(21,22,23,24)) + #manually set hollow shapes
-  #guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  geom_vline(xintercept =-7, color = "darkgrey", linetype = 2) +
+  annotate("text", x = log.scale[1:5], y = 0.5, label = split.times[16:20], angle=60, hjust = 0, vjust = 0.5, size = 2.25 ) +
+  annotate("text", x = -6.9, y = 0.5, label = "Avg.\n TMRCAs \n(mya)", size = 2.25 ) +
+  scale_x_continuous(labels=label.vector, breaks = linear.scale) + #change x-axis names of phylostrata to taxonomic split names
+  scale_colour_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually scale line colors
+  scale_fill_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually scale fill colors
+  scale_shape_manual(name = "", values = c(21,23,24)) + #manually set hollow shapes
   ylab("Hydrophobic clustering") + #set y-axis label
   theme(
     panel.grid.minor.x = element_blank(),
@@ -240,7 +362,42 @@ plot.dispersion.corrected <- plot.dispersion.corrected +
         axis.text.y = element_text(size=10),
         axis.title.y = element_text(size=11),
         axis.ticks = element_blank(),
-        axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,11)), hjust = 1, vjust = 0.5, colour=c(rep("black",7),"lightslategrey",rep("black",11))),
+        axis.text.x=element_text(angle = 90, size=c(rep(9,6)), hjust = 1, vjust = 0.5, colour=c(rep("black",4),colDarkBlue,colSkyBlue)),
+        legend.title = element_text(size=11),
+        legend.text = element_text(size=8),
+        legend.background = element_rect(fill="transparent"),
+        legend.position = c(0.4,0.8),
+        legend.direction = "horizontal",
+        plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm")) #plot specifics for sizes, positions, orientations, etc.
+
+plot.dispersion.inset
+
+tiff(file = "Clustering_Inset_Intergenic_Masked.tif", width =10, height = 10, units = "cm", res = 300) #output plot object to tif
+plot.dispersion.inset
+dev.off()
+
+
+linear.scale <- c(-1*interval.times$V1)
+log.scale <- c(axis.breaks)
+label.vector <- c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria\n","Euarchontoglires","Rodentia","Mus")
+
+
+plot.dispersion.corrected <- ggplot(corrected.data.frame, aes(colour = Model, fill = Model, shape = Model)) #create ggplot object
+plot.dispersion.corrected <- plot.dispersion.corrected + 
+  geom_pointrange(aes(x = c(log.scale,log.scale,log.scale[1:19],log.scale,log.scale), y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1, position = position_dodge(width = 0.05),  show.legend=TRUE) + #add points
+  geom_hline(yintercept = 1, linetype = "dashed" ) + #add horizontal line for Poisson expectation
+  scale_x_continuous(labels=label.vector, breaks = log.scale) + #change x-axis names of phylostrata to taxonomic split names
+  scale_colour_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue,colGreen,colPink), guide=guide_legend(nrow=3,byrow=TRUE)) + #manually scale line colors
+  scale_fill_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue,colGreen,colPink)) + #manually scale fill colors
+  scale_shape_manual(name = "", values = c(21,22,23,24,25)) + #manually set hollow shapes
+  ylab("Hydrophobic clustering") + #set y-axis label
+  theme(
+    panel.grid.minor.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=11),
+        axis.ticks = element_blank(),
+        axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,12)), hjust = 1, vjust = 0.5, colour=c(rep("black",7),"lightslategrey",rep("black",12))),
         legend.title = element_text(size=11),
         legend.text = element_text(size=8),
         legend.background = element_rect(fill="transparent"),
@@ -250,7 +407,7 @@ plot.dispersion.corrected <- plot.dispersion.corrected +
 
 plot.dispersion.corrected
 
-pdf(file = "DispersionGenesLengthRateExpression.pdf", width =6.7, height = 3) #output plot object to pdf
+tiff(file = "Clustering_Corrections_wHMM.tif", width =20, height = 10, units = "cm", res = 300) #output plot object to tif
 plot.dispersion.corrected
 dev.off()
 

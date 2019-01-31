@@ -6,29 +6,27 @@ output: html_document
   
 Load mySQL table info for genes
 ```{r}
-gene.data <- read.table("2017-06-20_EnsemblV73_MouseGenes.tab", sep="\t",header=T) 
-protein.data <- read.table("2017-06-20_EnsemblV73_MouseProteins.tab", sep="\t",header=T)
+gene.data <- read.table("2018-04-16_EnsemblV73_MouseGenes.tab", sep="\t",header=T) 
+protein.data <- read.table("2018-04-16_EnsemblV73_MouseProteins.tab", sep="\t",header=T)
 
 APR.data <- merge(gene.data, protein.data, by.x="MouseGenesPrimaryKey", by.y="MouseGenesForeignKey")
 remove(gene.data)
 remove(protein.data)
 ```
 
-Factorize gene family number and phylostratum
-```{r}
-APR.data$GeneFamilyNumber <- as.factor(APR.data$GeneFamilyNumber) #factorize gene family ID to prevent numeric interpretation by R
-APR.data$GeneFamilyPhylostratum <- as.factor(APR.data$GeneFamilyPhylostratum) #factorize variable to ensure that it is not interpreted as numeric variable
-APR.data$GeneFamilyPhylostratum <- with(APR.data, factor(GeneFamilyPhylostratum, levels = c(sort(unique(APR.data$GeneFamilyPhylostratum)),"Intergenic","Masked"))) # set levels of categorical phylostratum variable
-APR.data$ExcludedGeneBinary <- as.factor(APR.data$ExcludedGeneBinary) #factorize binary category for gene families with ambiguous age
 
-```
 
 Set phylostrata for intergenic controls
 ```{r}
-APR.data[which(APR.data$GeneOrControlDesignation == "IntergenicNucleotideSeqControl"),]$GeneFamilyPhylostratum <- "Intergenic" #Give intergenic sequence a categorical phylostratum for comparison
-APR.data[which(APR.data$GeneOrControlDesignation == "MaskedIntergenicNucleotideSeqControl"),]$GeneFamilyPhylostratum <- "Masked" #Give repeat-masked intergenic sequence a categorical phylostratum
+APR.data[which(APR.data$GeneOrControlDesignation == "IntergenicNucleotideSeqControl"),]$PS21_GeneFamilyPhylostratum <- "Intergenic" #Give intergenic sequence a categorical phylostratum for comparison
+APR.data[which(APR.data$GeneOrControlDesignation == "MaskedIntergenicNucleotideSeqControl"),]$PS21_GeneFamilyPhylostratum <- "Masked" #Give repeat-masked intergenic sequence a categorical phylostratum
 
 ```
+
+```{r}
+APR.data[which(APR.data$EnsemlGeneUID=="ENSMUSG00000067543"),]$PS21_GeneFamilyNumber <- APR.data[which(APR.data$EnsemlGeneUID=="ENSMUSG00000052262"),]$PS21_GeneFamilyNumber #Fix gene family for two pahari genes
+```
+
 
 Map expression values from genes to scrambled controls
 ```{r}
@@ -38,7 +36,19 @@ APR.data[which(APR.data$GeneOrControlDesignation == "ScrambledByAminoAcidControl
 
 Remove phylostratum 0 (unclassifiable), gene families with ambiguous age, genes without rat homologs, and ORFan proteins
 ```{r}
-APR.data <- APR.data[which(APR.data$GeneFamilyPhylostratum != "0" & APR.data$GeneFamilyPhylostratum != "20" & APR.data$ExcludedGeneBinary != "1" & !is.na(APR.data$EvolutionaryRateHighestOrthologRate)),] #exclude unclassifiable genes, false-positive rich ORFans
+paralogs.list <- c("ENSMUSG00000073631","ENSMUSG00000079800","ENSMUSG00000094728","ENSMUSG00000095240","ENSMUSG00000095366","ENSMUSG00000095450","ENSMUSG00000095787","ENSMUSG00000096100","ENSMUSG00000096850")
+APR.data <- APR.data[which(APR.data$PS21_GeneFamilyPhylostratum != "0" & APR.data$PS21_GeneFamilyPhylostratum != "21" & APR.data$PS21_ExcludedGeneBinary != "1" ),] #exclude unclassifiable genes, false-positive rich ORFans
+APR.data <- APR.data[which(!(APR.data$EnsemblGeneUID %in% paralogs.list)),]#remove genes with known paralogy to other genes
+
+```
+
+Factorize gene family number and phylostratum
+```{r}
+APR.data$PS21_GeneFamilyNumber <- as.factor(APR.data$PS21_GeneFamilyNumber) #factorize gene family ID to prevent numeric interpretation by R
+APR.data$PS21_GeneFamilyPhylostratum <- as.factor(APR.data$PS21_GeneFamilyPhylostratum) #factorize variable to ensure that it is not interpreted as numeric variable
+APR.data$PS21_GeneFamilyPhylostratum <- with(APR.data, factor(PS21_GeneFamilyPhylostratum, levels = c(sort(unique(APR.data$PS21_GeneFamilyPhylostratum)),"Intergenic","Masked"))) # set levels of categorical phylostratum variable
+APR.data$ExcludedGeneBinary <- as.factor(APR.data$ExcludedGeneBinary) #factorize binary category for gene families with ambiguous age
+
 ```
 
 Use two-parameter Box-Cox transform to reduce skewness
@@ -60,30 +70,41 @@ bc.transform <- function(x,l1,l2){ #Create function to transform data according 
 APR.data$bcTangoNumAA <- bc.transform(APR.data$TangoPentamerAAInAPRsDensity, lambda1.TangoNumAA, 0) 
 ```
 
+```{r}
+#Make QQ plots to see reduction in upper tail skewness
+tiff(file = "Tango_QQ.tif", width = 10, height = 10, units = "cm", res = 300)
+qqnorm(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$TangoPentamerAAInAPRsDensity, main = "Aggregation Q-Q Plot")
+qqline(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$TangoPentamerAAInAPRsDensity, lt=2)
+dev.off()
+
+tiff(file = "BoxCox_Tango_QQ.tif", width = 10, height = 10, units = "cm", res = 300)
+qqnorm(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$bcTangoNumAA, main = "Box-Cox Aggregation Q-Q Plot")
+qqline(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$bcTangoNumAA,lt=2)
+dev.off()
+
+
+tiff(file = "Combined_Tango_QQ.tif", width = 10, height = 15, units = "cm", res = 300)
+par(mfrow=c(2,1))
+qqnorm(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$TangoPentamerAAInAPRsDensity, main = "")
+qqline(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$TangoPentamerAAInAPRsDensity, lt=2)
+qqnorm(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$bcTangoNumAA, main = "")
+qqline(APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),]$bcTangoNumAA,lt=2)
+dev.off()
+
+```
+
+
 Generate family of linear models for each phylostratum, test significance of gene vs. randomized control controlling for gene family variance
 ```{r}
 
 #**********NLME FITS*********
 library(nlme)
 
-fit.APR.genes.family <- lme(bcTangoNumAA ~ GeneFamilyPhylostratum, random = ~ 1|GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
+fit.APR.genes.family <- lme(bcTangoNumAA ~ PS21_GeneFamilyPhylostratum, random = ~ 1|PS21_GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
 #summary(fit.APR.genes.family) #fit linear mixed-effects model for genes with gene family as random error term
 
-fit.APR.genes.family.expressed <- lme(bcTangoNumAA ~ GeneFamilyPhylostratum, random = ~ 1|GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene" & !is.na(APR.data$PaxDBExpression)),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
 
-fit.APR.genes.family.expression <- lme(bcTangoNumAA ~ GeneFamilyPhylostratum + PaxDBExpression, random = ~ 1|GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
-anova(fit.APR.genes.family.expressed, fit.APR.genes.family.expression)
-#summary(fit.APR.genes.family.expression) #fit linear mixed-effects model for genes with gene family as random error term
-
-fit.APR.genes.family.length <- lme(bcTangoNumAA ~ GeneFamilyPhylostratum + ProteinSeqLength, random = ~ 1|GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
-#summary(fit.APR.genes.family.length) #fit linear mixed-effects model for genes with gene family as random error term
-anova(fit.APR.genes.family, fit.APR.genes.family.length)
-
-fit.APR.genes.family.rate <- lme(bcTangoNumAA ~ GeneFamilyPhylostratum + EvolutionaryRateHighestOrthologRate, random = ~ 1|GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "CodingGene"),], control = list(opt = "optim"), na.action = na.exclude, method = "ML")
-anova(fit.APR.genes.family, fit.APR.genes.family.rate)
-
-
-fit.APR.scrambled.family <- lme(bcTangoNumAA ~ GeneFamilyPhylostratum , random = ~ 1|GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "ScrambledByAminoAcidControl"),], control = list(opt = "optim"), na.action = na.exclude) #fit scrambled controls with linear mixed-effects model with gene family as random error term
+fit.APR.scrambled.family <- lme(bcTangoNumAA ~ PS21_GeneFamilyPhylostratum , random = ~ 1|PS21_GeneFamilyNumber, data = APR.data[which(APR.data$GeneOrControlDesignation == "ScrambledByAminoAcidControl"),], control = list(opt = "optim"), na.action = na.exclude) #fit scrambled controls with linear mixed-effects model with gene family as random error term
 fit.APR.intergenic <- lm(bcTangoNumAA ~ 1 , data = APR.data[which(APR.data$GeneOrControlDesignation == "IntergenicNucleotideSeqControl"),]) #fit standard linear model to intergenic controls
 fit.APR.masked <- lm(bcTangoNumAA ~ 1 , data = APR.data[which(APR.data$GeneOrControlDesignation == "MaskedIntergenicNucleotideSeqControl"),]) #...same for repeat-masked controls
 
@@ -112,17 +133,13 @@ vertebrate.lengths <- mean(protein.lengths$Lengths[2:length(protein.lengths$Leng
 evolutionary.rates$Rates <- bc.reverse.transform(evolutionary.rates$Intercept, rate.lambda1, rate.lambda2)
 ```
 
+
+
 Plot means from each model with confidence intervals to test if they are significantly different
 ```{r}
 # Put model estimates into data frames
 last.index.genes <- length(fixed.effects(fit.APR.genes.family)) - 0 #store number of PS that have been fit (minus 2 for len and exp fixed effects)
 genes.family.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.APR.genes.family)[1:last.index.genes]), Intercept = unname(fixed.effects(fit.APR.genes.family)[1:last.index.genes]), SE = unname(summary(fit.APR.genes.family)$tTable[,2][1:last.index.genes]), Model = "Genes") #create data frame to store lm results for genes
-#remove(fit.APR.genes.family)
-
-last.index.genes.rate <- length(fixed.effects(fit.APR.genes.family.rate)) - 1 #store number of PS that have been fit (minus 2 for len and exp fixed effects)
-genes.family.rate.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.APR.genes.family.rate)[1:last.index.genes]), Intercept = unname(fixed.effects(fit.APR.genes.family.rate)[1:last.index.genes.rate]), SE = unname(summary(fit.APR.genes.family.rate)$tTable[,2][1:last.index.genes.rate]), Model = "Genes rate controlled") #create data frame to store lm results for genes
-#remove(fit.APR.genes.family.rate)
-
 
 last.index.scrambled <- length(fixed.effects(fit.APR.scrambled.family)) - 0 #store number of PS that have been fit for scrambled
 scrambled.family.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.APR.scrambled.family)[1:last.index.scrambled]), Intercept = unname(fixed.effects(fit.APR.scrambled.family)[1:last.index.scrambled]), SE = unname(summary(fit.APR.scrambled.family)$tTable[,2][1:last.index.scrambled]), Model = "Scrambled") #create data frame to store lm results for the scrambled fit
@@ -176,16 +193,19 @@ colPink <- colorblindPalette[8]
 
 interval.times <- read.table("split_interval_times.txt")
 axis.breaks <- -log10(interval.times$V1)
-axis.breaks <- c(axis.breaks,-7.8,-7.75) #add extra points for controls
+linear.scale <- c(-1*interval.times$V1, 100000000, 200000000)
+
+log.scale <- c(axis.breaks,-6.9,-6.85)
+label.vector <- c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria\n","Euarchontoglires","Rodentia","Mus","Intergenic","Masked")
 split.times <- as.character(round(interval.times$V1/1000000.0))
 
 aggregation.summary.plot <- ggplot(combined.data.frame.family[which(combined.data.frame.family$Model != "Scrambled" ),], aes(colour = Model, fill = Model, shape = Model)) #Create ggplot object
 aggregation.summary.plot <- aggregation.summary.plot + 
-  geom_pointrange(aes(x = axis.breaks, y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1,   show.legend=FALSE) + #add point between error bars
-  scale_x_continuous(labels=c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","*See figure\n legend","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria","\nEuarchontoglires","Rodentia","Intergenic","Repeat-masked"), breaks = axis.breaks) + #change x-axis names of phylostrata to taxonomic split names
-  geom_vline(xintercept = -7.85, color = "darkgrey", linetype = 2) +
-  annotate("text", x = axis.breaks[c(1:5,11:19)], y = rep(-0.075,14), label = split.times[c(1:5,11:19)], angle=60, hjust = 0, vjust = 0.5, size =2.25) +
-  annotate("text", x = -7.75, y = -0.07, label = "Avg. TMRCAs \n(mya)", size = 2.25 ) +
+  geom_pointrange(aes(x = log.scale, y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1,   show.legend=FALSE) + #add point between error bars
+  scale_x_continuous(labels=label.vector, breaks = log.scale) + #change x-axis names of phylostrata to taxonomic split names
+  geom_vline(xintercept = -7, color = "darkgrey", linetype = 2) +
+  annotate("text", x = log.scale[c(1:5,11:20)], y = rep(-0.075,15), label = split.times[c(1:5,11:20)], angle=60, hjust = 0, vjust = 0.5, size =2.25) +
+  annotate("text", x = -6.9, y = -0.05, label = "Avg.\n TMRCAs \n(mya)", size = 2.25 ) +
   scale_shape_manual(name = "", values = c(21,23,24)) + #manually set hollow shapes
   scale_colour_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually set line colors
   scale_fill_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually set fill colors
@@ -197,7 +217,7 @@ aggregation.summary.plot <- aggregation.summary.plot +
     axis.text.y = element_text(size=10),
     axis.title.y = element_text(size=11),
     axis.ticks = element_blank(),
-    axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,13)), hjust = 1, vjust = 0.5, colour=c(rep("black",7),"lightslategrey",rep("black",11),colDarkBlue,colSkyBlue)),
+    axis.text.x=element_text(angle = 90, size=c(rep(9,7),9,rep(9,13)), hjust = 1, vjust = 0.5, colour=c(rep("black",7),"black",rep("black",12),colDarkBlue,colSkyBlue)),
     legend.title = element_text(size=11),
     legend.text = element_text(size=8),
     legend.background = element_rect(fill="transparent"),
@@ -206,7 +226,7 @@ aggregation.summary.plot <- aggregation.summary.plot +
     plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm")) #plot specifics for sizes, positions, orientations, etc.
 aggregation.summary.plot
 
-pdf(file = "APRvsPSGenesIntergenicMasked_TangoAANumInAPR.pdf", width =6.7, height = 3) #output plot to pdf
+tiff(file = "Aggregation_Intergenic_Masked_Tango.tif", width =20, height = 10, units = "cm", res = 300) #output plot to pdf
 aggregation.summary.plot
 dev.off()
 

@@ -6,12 +6,23 @@ output: html_document
   
 Load mySQL table info for genes
 ```{r}
-gene.data <- read.table("2017-06-20_EnsemblV73_MouseGenes.tab", sep="\t",header=T) 
-protein.data <- read.table("2017-06-20_EnsemblV73_MouseProteins.tab", sep="\t",header=T)
+gene.data <- read.table("InputFinal/EnsemblV73_MouseGenes.tab", sep="\t",header=T) 
+protein.data <- read.table("InputFinal/EnsemblV73_MouseProteins.tab", sep="\t",header=T)
 
 APR.data <- merge(gene.data, protein.data, by.x="MouseGenesPrimaryKey", by.y="MouseGenesForeignKey")
 remove(gene.data)
 remove(protein.data)
+
+scrambled.data <- read.table("InputFinal/FILVMW_2018ScrambledControls.tab",sep="\t",header=TRUE)
+
+```
+
+```{r}
+APR.data[which(APR.data$EnsemlGeneUID=="ENSMUSG00000067543"),]$PS21_GeneFamilyNumber <- APR.data[which(APR.data$EnsemlGeneUID=="ENSMUSG00000052262"),]$PS21_GeneFamilyNumber #Fix gene family for two pahari genes
+
+paralogs.list <- c("ENSMUSG00000073631","ENSMUSG00000079800","ENSMUSG00000094728","ENSMUSG00000095240","ENSMUSG00000095366","ENSMUSG00000095450","ENSMUSG00000095787","ENSMUSG00000096100","ENSMUSG00000096850")
+APR.data <- APR.data[which(APR.data$PS21_GeneFamilyPhylostratum != "0" & APR.data$PS21_GeneFamilyPhylostratum != "21" & APR.data$PS21_ExcludedGeneBinary != "1" ),] #exclude unclassifiable genes, false-positive rich ORFans
+APR.data <- APR.data[which(!(APR.data$EnsemblGeneUID %in% paralogs.list)),]#remove genes with known paralogy to other genes
 
 
 ```
@@ -19,47 +30,54 @@ remove(protein.data)
 
 Factorize gene family number and phylostratum
 ```{r}
-APR.data$GeneFamilyNumber <- as.factor(APR.data$GeneFamilyNumber) #factorize gene family ID to prevent numeric interpretation by R
-APR.data$GeneFamilyPhylostratum <- as.factor(APR.data$GeneFamilyPhylostratum) #factorize variable to ensure that it is not interpreted as numeric variable
-APR.data$GeneFamilyPhylostratum <- with(APR.data, factor(GeneFamilyPhylostratum, levels = c(sort(unique(APR.data$GeneFamilyPhylostratum))))) # set levels of categorical phylostratum variable
-APR.data$ExcludedGeneBinary <- as.factor(APR.data$ExcludedGeneBinary) #factorize binary category for gene families with ambiguous age
+APR.data$PS21_GeneFamilyNumber <- as.factor(APR.data$PS21_GeneFamilyNumber) #factorize gene family ID to prevent numeric interpretation by R
+APR.data$PS21_GeneFamilyPhylostratum <- as.factor(APR.data$PS21_GeneFamilyPhylostratum) #factorize variable to ensure that it is not interpreted as numeric variable
+APR.data$PS21_GeneFamilyPhylostratum <- with(APR.data, factor(PS21_GeneFamilyPhylostratum, levels = c(sort(unique(APR.data$PS21_GeneFamilyPhylostratum))))) # set levels of categorical phylostratum variable
+APR.data$PS21_ExcludedGeneBinary <- as.factor(APR.data$PS21_ExcludedGeneBinary) #factorize binary category for gene families with ambiguous age
 
 
 ```
 
-Merge data frames 
-```{r}
-APR.data <- APR.data[,c("EnsemblGeneUID","GeneFamilyPhylostratum","GeneFamilyNumber","EvolutionaryRateHighestOrthologRate","ExcludedGeneBinary","TangoPentamerAAInAPRsDensity","WaltzPentamerAAInAPRsDensity","HydrophobicDispersionBlock6","GeneOrControlDesignation")] #choose specific columns to merge
-
-```
-
-Remove phylostratum 0 (unclassifiable), gene families with ambiguous age, genes without rat homologs, and ORFan proteins
-```{r}
-APR.data <- APR.data[which(APR.data$GeneFamilyPhylostratum != "0" & APR.data$GeneFamilyPhylostratum != "20" & APR.data$ExcludedGeneBinary != "1" ),] #exclude unclassifiable genes, false-positive rich ORFans
-```
 
 Split data frames into categories
 ```{r}
-genes <- APR.data[which(APR.data$GeneOrControlDesignation=="CodingGene"),c("EnsemblGeneUID","GeneFamilyPhylostratum","GeneFamilyNumber","TangoPentamerAAInAPRsDensity")] #split out genes
-scrambled <- APR.data[which(APR.data$GeneOrControlDesignation=="ScrambledByAminoAcidControl"), c("EnsemblGeneUID","TangoPentamerAAInAPRsDensity")] #...scrambled controls,
-dispersion <- APR.data[which(APR.data$GeneOrControlDesignation=="ConsistentHydrophobicDispersionControl"), c("EnsemblGeneUID","TangoPentamerAAInAPRsDensity")] #...and dispersion controls
+genes <- APR.data[which(APR.data$GeneOrControlDesignation=="CodingGene"),c("EnsemblGeneUID","PS21_GeneFamilyPhylostratum","PS21_GeneFamilyNumber","TangoPentamerAAInAPRsDensity","WaltzPentamerAAInAPRsDensity")] #split out genes
+scrambled <- APR.data[which(APR.data$GeneOrControlDesignation=="ScrambledByAminoAcidControl"), c("EnsemblGeneUID","TangoPentamerAAInAPRsDensity","WaltzPentamerAAInAPRsDensity")] #...scrambled controls,
+dispersion <- APR.data[which(APR.data$GeneOrControlDesignation=="ConsistentHydrophobicDispersionControl"), c("EnsemblGeneUID","TangoPentamerAAInAPRsDensity","WaltzPentamerAAInAPRsDensity")] #...and dispersion controls
+
+#USE FOR TANGO
+scrambled.mean <- aggregate(scrambled.data$TangoPentamerAAInAPRsDensity, by = list(scrambled.data$EnsemblGeneUID), FUN = mean, data=scrambled.data)
+colnames(scrambled.mean) <- c("EnsemblGeneUID","ScrambledMeanAPR")
+
+#USE FOR WALTZ
+# scrambled.mean <- aggregate(scrambled.data$WaltzPentamerAAInAPRsDensity, by = list(scrambled.data$EnsemblGeneUID), FUN = mean, data=scrambled.data)
+# colnames(scrambled.mean) <- c("EnsemblGeneUID","ScrambledMeanAPR")
+
 
 remove(APR.data) #clear bulk data frame
 
+#Use these for TANGO
 colnames(genes)[4] <- "GeneAPR" #make ISD column names unique so that they can be merged by EnsemblGeneUID
 colnames(scrambled)[2] <- "ScrambledAPR" #same here
 colnames(dispersion)[2] <- "DispersionAPR" #same here
+
+#Use these for Waltz
+# colnames(genes)[5] <- "GeneAPR" #make ISD column names unique so that they can be merged by EnsemblGeneUID
+# colnames(scrambled)[3] <- "ScrambledAPR" #same here
+# colnames(dispersion)[3] <- "DispersionAPR" #same here
 
 ```
 
 Merge genes and paired controls by EnsemblGeneID, combine into single data frame for calculating pairwise difference
 ```{r}
-paired.APR.df <- merge(genes, scrambled, by = "EnsemblGeneUID", all.x = TRUE) #merge genes and scrambled first
-APR.df <- merge(paired.APR.df, dispersion, by = "EnsemblGeneUID", all.x = TRUE) #merge the previous with dispersion controls (R merge only allows pairwise mergers)
+paired.APR.df.1 <- merge(genes, scrambled, by = "EnsemblGeneUID", all.x = TRUE) #merge genes and scrambled first
+paired.APR.df.2 <- merge(paired.APR.df.1, dispersion, by = "EnsemblGeneUID", all.x = TRUE) #merge in dispersion
+APR.df <- merge(paired.APR.df.2, scrambled.mean, by = "EnsemblGeneUID", all.x = TRUE) #merge the previous with dispersion controls (R merge only allows pairwise mergers)
 remove(genes) 
 remove(scrambled) 
 remove(dispersion)
-remove(paired.APR.df)
+remove(paired.APR.df.1)
+remove(paired.APR.df.2)
 ```
 
 Construct comparison for the difference between means of scrambled and unscrambled genes and dispersion controls
@@ -67,22 +85,27 @@ Construct comparison for the difference between means of scrambled and unscrambl
 #Construct a data frame for the difference in means between genes and scrambled genes
 APR.df$DifferenceGeneVsScrambledAPR <- APR.df$GeneAPR - APR.df$ScrambledAPR
 APR.df$DifferenceGenesVsDispersionAPR <- APR.df$GeneAPR - APR.df$DispersionAPR
-APR.df$DifferenceOfDifferences <- APR.df$DifferenceGeneVsScrambledAPR - APR.df$DifferenceGenesVsDispersionAPR
+APR.df$DifferenceGenesVsScrambledMean <- APR.df$GeneAPR - APR.df$ScrambledMeanAPR
+APR.df$DifferenceOfDifferences <- APR.df$DifferenceGenesVsScrambledMean - APR.df$DifferenceGenesVsDispersionAPR
 ```
 
 Generate family of linear models for each phylostratum, test significance of gene vs. randomized control controlling for gene family variance
 ```{r}
 library(nlme)
 
-lm.APR.genes.scrambled <- lme(DifferenceGeneVsScrambledAPR ~ GeneFamilyPhylostratum, random = ~ 1|GeneFamilyNumber, data = APR.df) #linear mixed-effects model for scrambled difference with gene families as independent sources of error
-lm.APR.genes.dispersion <- lme(DifferenceGenesVsDispersionAPR ~ GeneFamilyPhylostratum, random = ~ 1|GeneFamilyNumber, data =APR.df) #linear mixed-effects model for GC difference with gene families as independent sources of error
-lm.APR.scrambled.dispersion <- lme(DifferenceOfDifferences ~ GeneFamilyPhylostratum, random = ~ 1|GeneFamilyNumber, data =APR.df) #linear mixed-effects model for GC difference with gene families as independent sources of error
-summary(lm.APR.scrambled.dispersion)
+lm.APR.genes.scrambled <- lme(DifferenceGeneVsScrambledAPR ~ PS21_GeneFamilyPhylostratum, random = ~ 1|PS21_GeneFamilyNumber, data = APR.df) #linear mixed-effects model for scrambled difference with gene families as independent sources of error
+lm.APR.genes.dispersion <- lme(DifferenceGenesVsDispersionAPR ~ PS21_GeneFamilyPhylostratum, random = ~ 1|PS21_GeneFamilyNumber, data =APR.df) #linear mixed-effects model for GC difference with gene families as independent sources of error
+lm.APR.scrambled.dispersion <- lme(DifferenceOfDifferences ~ PS21_GeneFamilyPhylostratum, random = ~ 1|PS21_GeneFamilyNumber, data =APR.df) #linear mixed-effects model for GC difference with gene families as independent sources of error
 
-p.value.vector <- c("***","","","","*","","","*","","**","***","**","**","*","***","***","***","","") 
-#p.value.vector.waltz <- c(rep("",10),"***","**",rep("",7))
+lm.APR.genes.scrambled.mean <- lme(DifferenceGenesVsScrambledMean ~ PS21_GeneFamilyPhylostratum, random = ~ 1|PS21_GeneFamilyNumber, data =APR.df) 
 
-#remove(APR.df)
+
+p.value.levels <- c(summary(lm.APR.scrambled.dispersion)$tTable[,5] <0.01) + c(summary(lm.APR.scrambled.dispersion)$tTable[,5] <0.001) + c(summary(lm.APR.scrambled.dispersion)$tTable[,5] <0.0001)
+p.value.vector <- strrep("*",p.value.levels)
+significant.ps <- unname(which(p.value.levels != 0))
+insignificant.ps <- setdiff(1:20,significant.ps)
+
+
 
 ```
 
@@ -91,29 +114,54 @@ Plot means from each model with confidence intervals to test if they are signifi
 ```{r}
 # Put model estimates into temporary data frames
 last.index.scrambled <- length(fixed.effects(lm.APR.genes.scrambled)) #get number of phylostrata that have been fit
-genes.scrambled.df <- data.frame(Phylostratum = names(fixed.effects(lm.APR.genes.scrambled)[1:last.index.scrambled]), Intercept = unname(fixed.effects(lm.APR.genes.scrambled)[1:last.index.scrambled]), SE = unname(summary(lm.APR.genes.scrambled)$tTable[,2][1:last.index.scrambled]), Model = "Genes relative to scrambled controls") #construct data frame to hold linear model results
+genes.scrambled.df <- data.frame(Phylostratum = names(fixed.effects(lm.APR.genes.scrambled)[1:last.index.scrambled]), Intercept = unname(fixed.effects(lm.APR.genes.scrambled)[1:last.index.scrambled]), SE = unname(summary(lm.APR.genes.scrambled)$tTable[,2][1:last.index.scrambled]), Model = "Genes relative to scrambled control") #construct data frame to hold linear model results
 genes.scrambled.df$Intercept[2:last.index.scrambled] <- genes.scrambled.df$Intercept[2:last.index.scrambled] + genes.scrambled.df$Intercept[1] #increment means by first intercept to correct for R convention of relative means
+
+
+last.index.scrambled.mean <- length(fixed.effects(lm.APR.genes.scrambled.mean)) #get number of phylostrata that have been fit
+genes.scrambled.mean.df <- data.frame(Phylostratum = names(fixed.effects(lm.APR.genes.scrambled.mean)[1:last.index.scrambled.mean]), Intercept = unname(fixed.effects(lm.APR.genes.scrambled.mean)[1:last.index.scrambled.mean]), SE = unname(summary(lm.APR.genes.scrambled.mean)$tTable[,2][1:last.index.scrambled.mean]), Model = "Genes relative to scrambled controls") #construct data frame to hold linear model results
+genes.scrambled.mean.df$Intercept[2:last.index.scrambled.mean] <- genes.scrambled.mean.df$Intercept[2:last.index.scrambled.mean] + genes.scrambled.mean.df$Intercept[1] #increment means by first intercept to correct for R convention of relative means
+
 
 last.index.dispersion <- length(fixed.effects(lm.APR.genes.dispersion)) #same for dispersion controls...
 genes.dispersion.df <- data.frame(Phylostratum = names(fixef(lm.APR.genes.dispersion)[1:last.index.dispersion]), Intercept = unname(fixef(lm.APR.genes.dispersion)[1:last.index.dispersion]), SE = unname(summary(lm.APR.genes.dispersion)$tTable[,2][1:last.index.dispersion]), Model = "Genes relative to hydrophobic clustering controls") #...
 genes.dispersion.df$Intercept[2:last.index.dispersion] <- genes.dispersion.df$Intercept[2:last.index.dispersion] + genes.dispersion.df$Intercept[1] #...
 
+
 last.index.scrambled.dispersion <- length(fixed.effects(lm.APR.scrambled.dispersion)) #same for dispersion controls...
 scrambled.dispersion.df <- data.frame(Phylostratum = names(fixef(lm.APR.scrambled.dispersion)[1:last.index.scrambled.dispersion]), Intercept = unname(fixef(lm.APR.scrambled.dispersion)[1:last.index.scrambled.dispersion]), SE = unname(summary(lm.APR.scrambled.dispersion)$tTable[,2][1:last.index.scrambled.dispersion]), Pvalue = summary(lm.APR.scrambled.dispersion)$tTable[,5][1:last.index.scrambled.dispersion], Model = "Paired difference of differences" , Pstars = p.value.vector) #...
 scrambled.dispersion.df$Intercept[2:last.index.scrambled.dispersion] <- scrambled.dispersion.df$Intercept[2:last.index.scrambled.dispersion] + scrambled.dispersion.df$Intercept[1] #...
 
-percent.change.in.difference <- scrambled.dispersion.df$Intercept/genes.scrambled.df$Intercept * 100
+
+
+
+percent.change.in.difference <- scrambled.dispersion.df$Intercept/genes.scrambled.mean.df$Intercept * 100
+percent.change.in.ci <- genes.scrambled.mean.df$SE/genes.scrambled.df$SE * 100
+percent.reduction.in.ci <- 100.00 - percent.change.in.ci
+
 
 genes.scrambled.df$Phylostratum <- replace(as.character(genes.scrambled.df$Phylostratum),1:last.index.scrambled,c(1:last.index.scrambled)) #replace linear model text with factorized phylostrata
 genes.scrambled.df$Phylostratum <- with(genes.scrambled.df, factor(Phylostratum, levels = c(1:last.index.scrambled))) #set levels of factorized PS
 
+
+genes.scrambled.mean.df$Phylostratum <- replace(as.character(genes.scrambled.mean.df$Phylostratum),1:last.index.scrambled.mean,c(1:last.index.scrambled.mean)) #replace linear model text with factorized phylostrata
+genes.scrambled.mean.df$Phylostratum <- with(genes.scrambled.mean.df, factor(Phylostratum, levels = c(1:last.index.scrambled.mean))) #set levels of factorized PS
+
+
+
 genes.dispersion.df$Phylostratum <- replace(as.character(genes.dispersion.df$Phylostratum),1:last.index.dispersion,c(1:last.index.dispersion)) #same for dispersion data frame
 genes.dispersion.df$Phylostratum <- with(genes.dispersion.df, factor(Phylostratum, levels = c(1:last.index.dispersion))) # set levels of factorized PS
+
+
 
 scrambled.dispersion.df$Phylostratum <- replace(as.character(scrambled.dispersion.df$Phylostratum),1:last.index.scrambled.dispersion,c(1:last.index.scrambled.dispersion)) #same for dispersion data frame
 scrambled.dispersion.df$Phylostratum <- with(scrambled.dispersion.df, factor(Phylostratum, levels = c(1:last.index.scrambled.dispersion))) # set levels of factorized PS
 
-combined.differences.df <- rbind(genes.scrambled.df, genes.dispersion.df) #combine data frames into single result data frame
+
+
+
+
+combined.differences.df <- rbind(genes.scrambled.df, genes.scrambled.mean.df, genes.dispersion.df) #combine data frames into single result data frame
 
 ```
 
@@ -150,33 +198,37 @@ axis.breaks <- -log10(interval.times$V1)
 
 split.labels<-sprintf("%.2E", interval.times$V1)
 
+label.vector <- c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria\n","Euarchontoglires","Rodentia","Mus")
+split.times <- as.character(round(interval.times$V1/1000000.0))
 
-combined.differences.df$Times <-c(rep(axis.breaks,2))
+
+
+combined.differences.df$Times <-c(rep(axis.breaks,3))
 percent.labels <- paste(as.character(round(percent.change.in.difference)),"%",sep="")
 combined.labels <- paste(percent.labels,p.value.vector,sep="")
+
+color.vector <- rep("black",20)
+color.vector[significant.ps] <- "red"
 
 top.positions <- combined.differences.df$Intercept + 2.5*combined.differences.df$SE
 
 bottom.positions <- combined.differences.df$Intercept - 2*combined.differences.df$SE
 
-plot.APR.difference <- ggplot(combined.differences.df, aes(colour = Model, fill= Model, shape = Model)) #Create ggplot object
+plot.APR.difference <- ggplot(combined.differences.df[which(combined.differences.df$Model!="Genes relative to scrambled control"),], aes(colour = Model, fill= Model, shape = Model)) #Create ggplot object
 plot.APR.difference <- plot.APR.difference + 
   geom_hline(yintercept = 0, linetype = "dashed", colour = "black") + #add horizontal line for null expectation at 0
   
   geom_pointrange(aes(x = Times, y = Intercept, ymin = Intercept - 1.96*SE, ymax = Intercept + 1.96*SE), position = position_dodge(width = 0.05),size = 0.5, lwd = 0.5,  show.legend = TRUE) + #add points
   
-  annotate(geom="point",x = axis.breaks[c(1,5,8,10:17)], y = rep(-0.029,11), colour = "red", alpha = 1.0,size=0.75) +
-  annotate(geom="point",x = axis.breaks[c(2:4,6,7,9,18,19)], y = rep(-0.029,8), colour = "black", alpha = 1.0,size=0.75) +
-  
-  # annotate(geom="point",x = axis.breaks[c(11,12)], y = rep(-0.029,2), colour = "red", alpha = 1.0,size=0.75) +  #FOR WALTZ FIGURES
-  # annotate(geom="point",x = axis.breaks[c(1:10,13:19)], y = rep(-0.029,17), colour = "black", alpha = 1.0,size=0.75) + 
+  annotate(geom="point",x = axis.breaks[significant.ps], y = rep(-0.029,length(significant.ps)), colour = "red", alpha = 1.0,size=0.75) + #FOR TANGO AND WALTZ FIGURES
+  annotate(geom="point",x = axis.breaks[insignificant.ps], y = rep(-0.029,length(insignificant.ps)), colour = "black", alpha = 1.0,size=0.75) +
   
   
-  annotate("text", x = axis.breaks[c(1,5,8,10:17)] + c(0,0,-0.04,0,0.04,0,0,0,0,0,-0.05), y = top.positions[c(1,5,8,10:17)]+c(0.015,0.005,0.015,0.005,0.01,rep(0.005,6)), label = combined.labels[c(1,5,8,10:17)], angle = 0, hjust = 0.5, vjust = 0.75, size = 2) +
+  annotate("text", x = axis.breaks[significant.ps] + c(0,0,-0.075,0,0,0,0,0.05,0,-0.05,0,0,0,-0.075,0,0), y = top.positions[significant.ps]+c(0.015,0.015,0.010,0.020,0.01,0.02,rep(0.005,10)), label = combined.labels[significant.ps],fontface="bold", angle = 0, hjust = 0.5, vjust = 0.75, size = 2) + #FOR TANGO FIGURES
   
-  #annotate("text", x = axis.breaks[c(11,12)] + c(0.05,0), y = top.positions[c(11,12)] + c(0,0.005), label = combined.labels[c(11,12)], angle = 0, hjust = 0.5, vjust = 0.75, size = 2) + #FOR WALTZ FIGURES
-  
-  scale_x_continuous(labels=c("Cellular org.","Eukaryota","Opisthokonta","Holozoa","Metazoa","","","","","","Vertebrata","Euteleostomi","Tetrapoda","Amniota","Mammalia","Eutheria","Boreoeutheria","\nEuarchontoglires","Rodentia"), breaks = unique(combined.differences.df$Times)) + #change x-axis names of phylostrata to taxonomic split names
+  # annotate("text", x = axis.breaks[significant.ps] + c(0,-0.05,-0.05,0.05,0.05,-0.05), y = top.positions[significant.ps] + c(0.01,0.01,0.005,0.01,0,0), label = combined.labels[significant.ps], fontface="bold", angle = 0, hjust = 0.5, vjust = 0.75, size = 2) + #FOR WALTZ FIGURES
+
+  scale_x_continuous(labels=label.vector, breaks = unique(combined.differences.df$Times)) + #change x-axis names of phylostrata to taxonomic split names
   scale_shape_manual(name = "", values = c(22,23)) + #manually set shapes to hollow types
   scale_colour_manual(name = "", values = c(colVermillion, colSkyBlue)) + #manually set line colors
   scale_fill_manual(name = "", values = c(colVermillion, colSkyBlue), guide = guide_legend(ncol = 1)) +
@@ -190,7 +242,8 @@ plot.APR.difference <- plot.APR.difference +
         axis.title.y = element_text(size=11, colour="black"),
         axis.ticks = element_blank(),
         
-        axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,13)), hjust = 1, vjust = 0.5, colour=c("red","black","black","black","red","black","black","red","black","red","red","red","red","red","red","red","red","black","black")),
+        axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,14)), hjust = 1, vjust = 0.5,  colour=color.vector), #FOR TANGO AND WALTZ
+        #axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,14)), hjust = 1, vjust = 0.5, colour="black"),
         #axis.text.x=element_text(angle = 90, size=c(rep(9,7),8,rep(9,13)), hjust = 1, vjust = 0.5, colour=c(rep("black",10),"red","red",rep("black",7))), #FOR WALTZ 
         
         legend.title = element_text(size=9),
@@ -202,11 +255,11 @@ plot.APR.difference <- plot.APR.difference +
         plot.margin=unit(c(0.1,0.1,0.1,0.1), "in")) #plot specifics for sizes, positions, orientations, etc.
 plot.APR.difference
 
-pdf(file = "PairedDifference_TangoAANumInAPR.pdf", width= 6.7, height = 4) #output plot to pdf
+tiff(file = "PairedDifference_TangoAANumInAPR.tif", width =20, height = 10, units = "cm", res = 300) #output plot to tif
 plot.APR.difference
 dev.off()
 
-# pdf(file = "PairedDifference_WaltzAANumInAPR.pdf", width= 6.7, height = 4) #output plot to pdf
+# tiff(file = "PairedDifference_WaltzAANumInAPR.tif", width =20, height = 10, units = "cm", res = 300) #output plot to tif
 # plot.APR.difference
 # dev.off()
 

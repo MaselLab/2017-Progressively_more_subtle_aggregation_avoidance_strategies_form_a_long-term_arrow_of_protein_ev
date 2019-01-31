@@ -1,0 +1,154 @@
+---
+title: "Regression analysis of hydrophobicity dispersion of yeast proteins"
+author: "Ben Wilson"
+date: "August 14, 2018"
+output: html_document
+---
+  
+Load mySQL table info for genes
+```{r}
+APR.data <- read.table("ScerevisiaeGenesAndProteins.tab",header=T,sep="\t") #read mySQL data into data frame
+clustering.data <- read.table("2018-06-30_ScerevisiaeGenesAndProteins.tab", sep = "\t", header = TRUE)
+```
+
+Remove phylostratum 0 (unclassifiable), gene families with ambiguous age, genes without rat homologs, and ORFan proteins
+```{r}
+APR.data <- APR.data[which(APR.data$GeneFamilyPhylostratum != "0" & APR.data$ExcludedAsDubious != 1),] #exclude unclassifiable genes, false-positive rich ORFans
+```
+
+Trim data frame to only the information needed
+```{r}
+genes <- APR.data[,c("GeneUID","GeneFamilyNumber","GeneFamilyPhylostratum","CarvunisConservationLevels")] #subset out 
+clustering.data <- clustering.data[,c("GeneUID","CordesBinaryHydrophobicDispersionBlock6")]
+genes <- merge(genes, clustering.data, by = "GeneUID")
+
+```
+
+Factorize categorical variables before linear model construction
+```{r}
+genes$GeneFamilyNumber <- as.factor(genes$GeneFamilyNumber) #factorize gene family identifier to prevent numeric interpretation
+genes$GeneFamilyPhylostratum <- as.factor(genes$GeneFamilyPhylostratum) #factorize PS to prevent numeric interpretation in fit
+genes$GeneFamilyPhylostratum <- with(genes, factor(GeneFamilyPhylostratum, levels = c(sort(unique(genes$GeneFamilyPhylostratum))))) # set levels of categorical phylostratum variable
+genes$CarvunisConservationLevels <- as.factor(genes$CarvunisConservationLevels) #factorize PS to prevent numeric interpretation in fit
+genes$CarvunisConservationLevels <- with(genes, factor(CarvunisConservationLevels, levels = c(sort(unique(genes$CarvunisConservationLevels))))) # set levels of categorical
+
+```
+
+Merge intermediate phylostrata where differences are not-significant (comment this out for full analysis)
+```{r}
+#genes[which(genes$GeneFamilyPhylostratum %in% c(2:9)),]$GeneFamilyPhylostratum <- 2 
+```
+
+
+Use two-parameter Box-Cox transform to reduce skewness
+```{r}
+library(geoR)
+bcFit <- boxcoxfit(genes$CordesBinaryHydrophobicDispersionBlock6, lambda2 =  NULL) #Fit 1-parameter Box-Cox transformation
+lambda1 <- unname(bcFit$lambda[1])
+lambda2 <- 0
+lambda1
+lambda2
+
+bc.transform <- function(x,l1,l2){
+  x.transform <- ((x+l2)^l1 - 1)/l1
+  return(x.transform)
+}
+
+genes$bcDispersion <- bc.transform(genes$CordesBinaryHydrophobicDispersionBlock6, lambda1, lambda2) #transform data to reduce heteroskedasticity
+```
+
+Generate family of linear models for each phylostratum to give mean dispersion corrected for gene family non-independence
+```{r}
+library(nlme)
+
+fit.dispersion.genes.standard <- lm(bcDispersion ~ GeneFamilyPhylostratum, data = genes)
+AIC(fit.dispersion.genes.standard) #fit a standard linear model for comparison, print AIC
+
+fit.dispersion.genes.family <- lme(bcDispersion ~ GeneFamilyPhylostratum , random = ~ 1|GeneFamilyNumber, data = genes, method = "ML")
+summary(fit.dispersion.genes.family) #fit a mixed-effects model with gene family as a random effect term
+
+fit.dispersion.genes.phylo.mid <- lme(bcDispersion ~ 1 , random = ~ 1|GeneFamilyNumber, data = genes[which(genes$GeneFamilyPhylostratum%in%c(2:9)),], method = "ML")
+
+fit.dispersion.genes.mid <- lme(bcDispersion ~ GeneFamilyPhylostratum , random = ~ 1|GeneFamilyNumber, data = genes[which(genes$GeneFamilyPhylostratum%in%c(2:9)),], method = "ML")
+
+anova(fit.dispersion.genes.phylo.mid,fit.dispersion.genes.mid)
+
+
+
+
+```
+
+
+
+Plot means from each model with confidence intervals, build data frames first
+```{r}
+# Put model estimates into data frames
+last.index.genes <- length(fixed.effects(fit.dispersion.genes.family)) #get number of phylostrata that have been fit
+genes.data.frame <- data.frame(Phylostratum = names(fixed.effects(fit.dispersion.genes.family)[1:last.index.genes]), Intercept = unname(fixed.effects(fit.dispersion.genes.family)[1:last.index.genes]), SE = unname(summary(fit.dispersion.genes.family)$tTable[,2][1:last.index.genes]), Model = "Genes") #create data frame to hold linear model results
+
+
+
+```
+
+Adjust means for each phylostrata by incrementing by the first mean (adjust for R convention), factorize phylostratum
+```{r}
+# Adjust intecepts, combine data frames
+genes.data.frame$Intercept[2:last.index.genes] <- genes.data.frame$Intercept[2:last.index.genes] + genes.data.frame$Intercept[1] #increment means by first mean
+
+genes.data.frame$Phylostratum <- replace(as.character(genes.data.frame$Phylostratum),1:(last.index.genes),c(1:last.index.genes)) #replace linear model text with readable phylostratum names
+genes.data.frame$Phylostratum <- with(genes.data.frame, factor(Phylostratum, levels = c(1:max(last.index.genes)))) #factorize phylostratum before plotting
+```
+
+Make plots to visualize effects of different categorization
+```{r}
+# Plots for each categorization
+library("ggplot2")
+
+# Function to reverse Box-Cox transformation to interpretable format
+bc.reverse.transform <- function(x,l1,l2){
+  x.reverse.transform <- (x*l1+1)^(1/l1)-l2
+  return(x.reverse.transform)
+}
+
+colorblindPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+colBlack <- colorblindPalette[1]
+colOrange <- colorblindPalette[2]
+colSkyBlue <- colorblindPalette[3]
+colGreen <- colorblindPalette[4]
+colYellow <- colorblindPalette[5]
+colDarkBlue <- colorblindPalette[6]
+colVermillion <- colorblindPalette[7]
+colPink <- colorblindPalette[8]
+
+
+plot.dispersion <- ggplot(genes.data.frame, aes(colour = Model, fill = Model, shape = Model)) #create ggplot object
+plot.dispersion <- plot.dispersion + 
+  geom_pointrange(aes(x = Phylostratum, y = bc.reverse.transform(Intercept, lambda1, lambda2), ymin = bc.reverse.transform(Intercept - SE, lambda1, lambda2), ymax = bc.reverse.transform(Intercept + SE, lambda1, lambda2)), size = 0.5, lwd = 1, position = position_dodge(width = 0.75),  show.legend=FALSE) + #add points
+
+  geom_hline(yintercept = 1, linetype = "dashed" ) + #add horizontal line for Poisson expectation
+  scale_colour_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually scale line colors
+  scale_fill_manual(name = "", values = c(colBlack,colDarkBlue,colSkyBlue)) + #manually scale fill colors
+  scale_shape_manual(name = "", values = c(21,23,24)) + #manually set hollow shapes
+  scale_x_discrete(labels=c("Cellular org.","Eukaryota","Opisthokonta","Fungi","Dikarya","Ascomycota","Saccharomyceta","Saccharomycetales","Sacccharomycetaceae","S. cerevisiae")) +
+  ylab("Hydrophobic clustering") + #set y-axis label
+  theme(
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size=10),
+        axis.title.y = element_text(size=11),
+        axis.ticks = element_blank(),
+        axis.text.x=element_text(angle = 90, size=10, hjust = 1, vjust = 0),
+        legend.title = element_blank(),
+        legend.text = element_blank(),
+        legend.background = element_rect(fill="transparent"),
+        plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm")) #plot specifics for sizes, positions, orientations, etc.
+
+plot.dispersion
+
+
+tiff(file = "Clustering_Yeast_Full_New.tif", width =20, height = 10, units = "cm", res = 300) #output plot object to tif
+plot.dispersion
+dev.off()
+
+
+
+```
