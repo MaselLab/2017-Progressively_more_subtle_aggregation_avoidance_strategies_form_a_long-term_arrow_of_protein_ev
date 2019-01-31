@@ -1,0 +1,2 @@
+*.tab filter=lfs diff=lfs merge=lfs -text
+*.tab.zip filter=lfs diff=lfs merge=lfs -text
